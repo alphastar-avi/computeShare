@@ -31,7 +31,10 @@ SERVER_URL = "http://localhost:8000"
 WORKER_PIN = None
 
 def get_headers():
-    return {"X-Auth-Pin": WORKER_PIN}
+    return {
+        "X-Auth-Pin": WORKER_PIN,
+        "ngrok-skip-browser-warning": "true"
+    }
 
 def get_server_version():
     """Queries the parameter server for the current model version."""
@@ -145,7 +148,7 @@ def main(world_size: int, rank: int, worker_id: str):
                 
                 # Record successful train step to prevent double-dipping the same weights
                 last_trained_version = version
-                time.sleep(1.0) # Pace for free-tier ngrok
+                time.sleep(2.0) # Pace for free-tier ngrok
                 
                 # Break the polling loop and move to the next batch of images
                 break
