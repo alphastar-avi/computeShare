@@ -11,7 +11,9 @@ from model import SimpleNet
 app = FastAPI()
 
 # Global state for Parameter Server
+# Global state for Parameter Server
 global_model = SimpleNet()
+optimizer = torch.optim.SGD(global_model.parameters(), lr=0.01, momentum=0.9)
 model_version = 0
 gradient_buffer = []
 BUFFER_SIZE = 2
@@ -69,12 +71,16 @@ def submit_gradients(data: Gradients, pin: str = Depends(verify_pin)):
                 # Compute the mean across workers
                 avg_grads[name] = torch.mean(stacked, dim=0)
 
-            # PyTorch In-Place Update Fix: update the underlying tensor data directly
-            learning_rate = 0.01
+            # PyTorch In-Place Update Fix: Use a real optimizer instead of manual subtraction.
+            # Manual subtraction causes unstable training, exploding gradients, and 10% accuracy.
+            optimizer.zero_grad()
             for name, param in global_model.named_parameters():
                 if name in avg_grads:
-                    # Modify the underlying tensor data directly to avoid in-place modification errors
-                    param.data -= learning_rate * avg_grads[name]
+                    # Inject the averaged gradients directly into the global model's .grad attribute
+                    param.grad = avg_grads[name]
+                    
+            # Let PyTorch's native SGD (with momentum) safely update the parameters
+            optimizer.step()
                     
             # Increment the version and clear the gradient buffer safely
             model_version += 1
