@@ -150,8 +150,14 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
                 loss = F.cross_entropy(output, target)
                 
                 # Backward Pass
+                # IMPORTANT DISTRIBUTED MATH FIX: 
+                # We must scale the loss by World Size *before* computing gradients.
+                # Otherwise, when the Server averages them, the magnitude is mathematically blown out 
+                # (effectively multiplying the learning rate by the number of workers), destroying convergence.
+                scaled_loss = loss / world_size
+                
                 model.zero_grad()
-                loss.backward()
+                scaled_loss.backward()
                 
                 # Extract gradients to standard Python objects natively
                 grads = {name: param.grad for name, param in model.named_parameters()}
