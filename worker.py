@@ -109,8 +109,8 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
     model.to(device)
 
     # Load the subset into a DataLoader
-    # pin_memory helps speed up CPU -> MPS memory transfer
-    dataloader = DataLoader(worker_subset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
+    # pin_memory throws a warning on MPS, so it has been removed.
+    dataloader = DataLoader(worker_subset, batch_size=batch_size, shuffle=True, num_workers=2)
     
     print(f"📊 Dataset successfully sharded. This worker gets {len(worker_subset)}/{total_samples} samples.")
     print("---------------------------------------------------------")
