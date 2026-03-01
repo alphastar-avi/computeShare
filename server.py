@@ -56,9 +56,11 @@ def submit_gradients(data: Gradients, pin: str = Depends(verify_pin)):
     global model_version
     with lock:
         gradient_buffer.append(data.grads)
+        print(f"📥 [Server] Received gradients from Worker {data.worker_id}. Buffer: {len(gradient_buffer)}/{BUFFER_SIZE}")
         
         # Check if we have received exactly BUFFER_SIZE (2) gradient submissions
         if len(gradient_buffer) == BUFFER_SIZE:
+            print(f"⚙️ [Server] Buffer full! Averaging gradients from {BUFFER_SIZE} workers...")
             # Average the gradients
             avg_grads = {}
             for name in gradient_buffer[0].keys():
@@ -76,6 +78,7 @@ def submit_gradients(data: Gradients, pin: str = Depends(verify_pin)):
                     
             # Increment the version and clear the gradient buffer safely
             model_version += 1
+            print(f"✅ [Server] Global Model updated to Version {model_version}")
             gradient_buffer.clear()
             
             # Save the model gracefully once it hits TARGET_VERSIONS
@@ -111,7 +114,7 @@ if __name__ == "__main__":
     while True:
         try:
             BUFFER_SIZE = int(input("Enter WORLD_SIZE (Number of workers to wait for, e.g., 2): "))
-            TARGET_VERSIONS = int(input("Enter TOTAL_EPOCHS (Number of global averages to perform, e.g., 2): "))
+            TARGET_VERSIONS = int(input("Enter TOTAL_GLOBAL_BATCHES (Number of global averages to perform, e.g., 50): "))
             if BUFFER_SIZE > 0 and TARGET_VERSIONS > 0:
                 break
             print("Please enter positive integers.")

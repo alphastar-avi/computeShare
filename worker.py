@@ -131,9 +131,11 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
                 # Crucial Synchronization Logic: 
                 # If the version hasn't incremented since our last training step, DO NOT process the batch.
                 if current_version == last_trained_version:
+                    print(f"⏳ [Worker {worker_id}] Server Version {current_version} is unchanged. Waiting for other workers...")
                     time.sleep(0.5)
                     continue
                     
+                print(f"🔄 [Worker {worker_id}] New Server Version {current_version} detected! Pulling weights...")
                 # Pull new target weights for this batch
                 version = pull_model(model)
                 if version is None:
@@ -155,8 +157,9 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
                 grads = {name: param.grad for name, param in model.named_parameters()}
                 
                 # Submit computed gradients to the Parameter Server
+                print(f"⬆️ [Worker {worker_id}] Computed Loss: {loss.item():.4f} for Batch {batch_idx+1}. Submitting gradients...")
                 submit_gradients(worker_id, grads)
-                print(f"[Batch {batch_idx+1}] Worker {worker_id} submitted gradients for Server Version {version}. Loss: {loss.item():.4f}")
+                print(f"✅ [Worker {worker_id}] Gradients submitted successfully for Server Version {version}!")
                 
                 # Record successful train step to prevent double-dipping the same weights
                 last_trained_version = version
@@ -209,7 +212,7 @@ if __name__ == "__main__":
             world_size = int(input("Enter WORLD_SIZE (Total number of workers, e.g., 2): "))
             rank = int(input("Enter RANK (This worker's ID, starting from 0): "))
             batch_size = int(input("Enter BATCH_SIZE (e.g., 16 or 32): "))
-            target_versions = int(input("Enter TOTAL_EPOCHS (Must match server, e.g., 2): "))
+            target_versions = int(input("Enter TOTAL_GLOBAL_BATCHES (Must match server, e.g., 50): "))
             if rank >= world_size or rank < 0:
                 print("Invalid configuration. RANK must be between 0 and (WORLD_SIZE - 1).")
                 continue
