@@ -99,9 +99,17 @@ def main(world_size: int, rank: int, worker_id: str):
     # Create the subset specifically for this worker
     worker_subset = Subset(dataset, worker_indices)
     
+    # ---------------------------------------------------------
+    # Performance Optimization for macOS CPUs
+    # ---------------------------------------------------------
+    # Maximize CPU core usage for the underlying math operations
+    torch.set_num_threads(4)
+
     # Load the subset into a DataLoader
-    batch_size = 16
-    dataloader = DataLoader(worker_subset, batch_size=batch_size, shuffle=True)
+    # We increase the batch size slightly, add num_workers for parallel image loading, 
+    # and pin_memory for faster RAM-to-CPU transfers.
+    batch_size = 32
+    dataloader = DataLoader(worker_subset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
     
     print(f"📊 Dataset successfully sharded. This worker gets {len(worker_subset)}/{total_samples} samples.")
     print("---------------------------------------------------------")
@@ -144,11 +152,11 @@ def main(world_size: int, rank: int, worker_id: str):
                 
                 # Submit computed gradients to the Parameter Server
                 submit_gradients(worker_id, grads)
-                print(f"[Batch {batch_idx+1}] Worker {worker_id} submitted gradients for Version {version}. Loss: {loss.item():.4f}")
+                print(f"[Batch {batch_idx+1}] Worker {worker_id} submitted gradients for Server Version {version}. Loss: {loss.item():.4f}")
                 
                 # Record successful train step to prevent double-dipping the same weights
                 last_trained_version = version
-                time.sleep(2.0) # Pace for free-tier ngrok
+                time.sleep(1.0) # Pace for free-tier loc tunnel
                 
                 # Break the polling loop and move to the next batch of images
                 break
@@ -159,8 +167,10 @@ def main(world_size: int, rank: int, worker_id: str):
             except Exception as e:
                 print(f"Error during training loop: {e}")
                 time.sleep(2)
-
-    print(f"\n🏁 Worker {worker_id} successfully finished processing its entire data shard.")
+                
+        # USER REQUEST: Stop training after exactly 1 batch for testing purposes
+        print("\n✅ User Request: Stopping worker after processing 1 batch for quick test.")
+        break
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parameter Worker")
