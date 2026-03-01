@@ -128,7 +128,6 @@ if __name__ == "__main__":
     parser.add_argument("--pin", type=str, help="4-digit PIN for server authentication")
     args = parser.parse_args()
 
-    global WORKER_PIN
     if args.pin:
         WORKER_PIN = args.pin
     else:
