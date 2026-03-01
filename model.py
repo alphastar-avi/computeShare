@@ -1,24 +1,26 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torchvision.models as models
 
 class SimpleNet(nn.Module):
     """
-    A slightly heavier CNN to simulate real computation and naturally 
-    pace the network requests.
+    A lightweight standard PyTorch ResNet-18 model modified for the MNIST dataset.
+    Since MNIST is a 1-channel (grayscale) image dataset, we need to adapt 
+    the first convolutional layer and the final fully connected layer.
     """
     def __init__(self):
         super(SimpleNet, self).__init__()
-        self.conv1 = nn.Conv2d(1, 16, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
-        self.fc1 = nn.Linear(32 * 7 * 7, 128)
-        self.fc2 = nn.Linear(128, 10)
+        # Load an untrained ResNet18 model
+        self.resnet = models.resnet18(weights=None)
+        
+        # Modify the first Convolutional Layer to accept 1-channel images instead of 3 (RGB)
+        # keeping the other original parameters intact.
+        self.resnet.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        
+        # Modify the final Fully Connected Layer to output exactly 10 classes (digits 0-9)
+        num_ftrs = self.resnet.fc.in_features
+        self.resnet.fc = nn.Linear(num_ftrs, 10)
 
     def forward(self, x):
-        # x expected shape: (batch_size, 1, 28, 28)
-        x = F.relu(F.max_pool2d(self.conv1(x), 2))
-        x = F.relu(F.max_pool2d(self.conv2(x), 2))
-        x = x.view(x.size(0), -1)  # Flatten
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
-        return x
+        return self.resnet(x)
+
