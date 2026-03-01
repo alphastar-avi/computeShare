@@ -1,0 +1,114 @@
+import time
+import requests
+import torch
+import torch.nn.functional as F
+import uuid
+from model import SimpleNet
+
+SERVER_URL = "http://localhost:8000"
+
+def get_server_version():
+    """Queries the parameter server for the current model version."""
+    try:
+        response = requests.get(f"{SERVER_URL}/version")
+        response.raise_for_status()
+        return response.json()["version"]
+    except Exception as e:
+        print(f"Failed to get version: {e}")
+        return None
+
+def pull_model(model):
+    """Pulls the latest weights and version from the parameter server."""
+    try:
+        response = requests.get(f"{SERVER_URL}/model")
+        response.raise_for_status()
+        data = response.json()
+        version = data["version"]
+        weights = data["weights"]
+        
+        # Convert Lists back to PyTorch Tensors and load state dict
+        state_dict = {k: torch.tensor(v) for k, v in weights.items()}
+        model.load_state_dict(state_dict)
+        return version
+    except Exception as e:
+        print(f"Failed to pull model: {e}")
+        return None
+
+def submit_gradients(worker_id, grads):
+    """Submits the computed gradients to the parameter server in JSON-friendly format."""
+    # Convert grad tensors to standard Python lists for JSON serialization
+    grads_list = {k: v.cpu().tolist() for k, v in grads.items() if v is not None}
+    
+    payload = {
+        "worker_id": worker_id,
+        "grads": grads_list
+    }
+    
+    try:
+        response = requests.post(f"{SERVER_URL}/submit_gradients", json=payload)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"Failed to submit gradients: {e}")
+        return None
+
+def main():
+    worker_id = str(uuid.uuid4())[:8]
+    print(f"Worker {worker_id} starting...")
+    
+    model = SimpleNet()
+    last_trained_version = -1
+    
+    while True:
+        try:
+            # Check server's current version
+            current_version = get_server_version()
+            if current_version is None:
+                time.sleep(2)
+                continue
+                
+            # Worker Synchronization: If the version hasn't changed since last pull, sleep and poll again
+            if current_version == last_trained_version:
+                print(f"Version {current_version} unchanged. Waiting (time.sleep(0.5))...")
+                time.sleep(0.5)
+                continue
+                
+            # Pull new model
+            version = pull_model(model)
+            if version is None:
+                time.sleep(2)
+                continue
+                
+            print(f"Worker {worker_id} pulled model version {version}. Training...")
+            
+            # Generate dummy data and target
+            x = torch.randn(16, 10)
+            target = torch.randint(0, 2, (16,))
+            
+            # Forward pass
+            output = model(x)
+            loss = F.cross_entropy(output, target)
+            
+            # Backward pass
+            model.zero_grad()
+            loss.backward()
+            
+            # Extract gradients mapping parameter name to the Tensor grad
+            grads = {name: param.grad for name, param in model.named_parameters()}
+            
+            # Submit to the Parameter Server
+            submit_gradients(worker_id, grads)
+            print(f"Worker {worker_id} submitted gradients for version {version}. Loss: {loss.item():.4f}")
+            
+            # Record that we've successfully trained on this version
+            last_trained_version = version
+            
+        except ConnectionError:
+            print("Could not connect to server, waiting...")
+            time.sleep(2)
+        except Exception as e:
+            print(f"Error during training loop: {e}")
+            time.sleep(2)
+
+if __name__ == "__main__":
+    main()
