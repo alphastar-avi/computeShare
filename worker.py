@@ -165,7 +165,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # 1. Authenticaton Logic
-    global WORKER_PIN
     if args.pin:
         WORKER_PIN = args.pin
     else:
