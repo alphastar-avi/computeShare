@@ -15,6 +15,7 @@ global_model = SimpleNet()
 model_version = 0
 gradient_buffer = []
 BUFFER_SIZE = 2
+TARGET_VERSIONS = 10
 SERVER_PIN = None
 
 # Concurrency safety: Lock for endpoints that modify or read consistent state
@@ -77,10 +78,10 @@ def submit_gradients(data: Gradients, pin: str = Depends(verify_pin)):
             model_version += 1
             gradient_buffer.clear()
             
-            # Save the model gracefully once it hits 10 epochs
-            if model_version == 10:
+            # Save the model gracefully once it hits TARGET_VERSIONS
+            if model_version >= TARGET_VERSIONS:
                 torch.save(global_model.state_dict(), "trained_model.pth")
-                print("\n🎉 Training Complete! Saved weights to 'trained_model.pth'\n")
+                print("\n Training Complete! Saved weights to 'trained_model.pth'\n")
             
             return {
                 "status": "success", 
@@ -105,6 +106,17 @@ if __name__ == "__main__":
                 SERVER_PIN = pin_input
                 break
             print("Invalid input. Please enter exactly 4 digits.")
+            
+    print("\n--- Server Configuration ---")
+    while True:
+        try:
+            BUFFER_SIZE = int(input("Enter WORLD_SIZE (Number of workers to wait for, e.g., 2): "))
+            TARGET_VERSIONS = int(input("Enter TOTAL_EPOCHS (Number of global averages to perform, e.g., 2): "))
+            if BUFFER_SIZE > 0 and TARGET_VERSIONS > 0:
+                break
+            print("Please enter positive integers.")
+        except ValueError:
+            print("Please enter valid integers.")
     
-    print(f"🔒 Server secured with PIN: {SERVER_PIN}")
+    print(f" Server secured with PIN: {SERVER_PIN} | World Size: {BUFFER_SIZE} | Target Epochs: {TARGET_VERSIONS}")
     uvicorn.run(app, host="0.0.0.0", port=8000)

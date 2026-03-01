@@ -81,7 +81,7 @@ def submit_gradients(worker_id, grads):
         print(f"Failed to submit gradients: {e}")
         return None
 
-def main(world_size: int, rank: int, worker_id: str):
+def main(world_size: int, rank: int, batch_size: int, target_versions: int, worker_id: str):
     print(f"\n🚀 Worker {worker_id} (Rank {rank}/{world_size-1}) starting...")
     
     # ---------------------------------------------------------
@@ -106,10 +106,9 @@ def main(world_size: int, rank: int, worker_id: str):
     torch.set_num_threads(4)
 
     # Load the subset into a DataLoader
-    # We increase the batch size slightly, add num_workers for parallel image loading, 
-    # and pin_memory for faster RAM-to-CPU transfers.
-    batch_size = 32
-    dataloader = DataLoader(worker_subset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
+    # We add num_workers for parallel image loading.
+    # pin_memory is removed to suppress macOS MPS warnings.
+    dataloader = DataLoader(worker_subset, batch_size=batch_size, shuffle=True, num_workers=2)
     
     print(f"📊 Dataset successfully sharded. This worker gets {len(worker_subset)}/{total_samples} samples.")
     print("---------------------------------------------------------")
@@ -168,9 +167,10 @@ def main(world_size: int, rank: int, worker_id: str):
                 print(f"Error during training loop: {e}")
                 time.sleep(2)
                 
-        # USER REQUEST: Stop training after exactly 1 batch for testing purposes
-        print("\n✅ User Request: Stopping worker after processing 1 batch for quick test.")
-        break
+        # Check if we've reached the target number of global batches
+        if last_trained_version >= target_versions:
+            print(f"\n✅ Worker {worker_id} successfully finished {target_versions} global training batches.")
+            break
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parameter Worker")
@@ -194,8 +194,13 @@ if __name__ == "__main__":
         try:
             world_size = int(input("Enter WORLD_SIZE (Total number of workers, e.g., 2): "))
             rank = int(input("Enter RANK (This worker's ID, starting from 0): "))
+            batch_size = int(input("Enter BATCH_SIZE (e.g., 16 or 32): "))
+            target_versions = int(input("Enter TOTAL_EPOCHS (Must match server, e.g., 2): "))
             if rank >= world_size or rank < 0:
                 print("Invalid configuration. RANK must be between 0 and (WORLD_SIZE - 1).")
+                continue
+            if batch_size <= 0 or target_versions <= 0:
+                print("Batch size and epochs must be positive.")
                 continue
             break
         except ValueError:
@@ -206,4 +211,4 @@ if __name__ == "__main__":
     worker_id = str(uuid.uuid4())[:8]
 
     # Execute universal loop
-    main(world_size=world_size, rank=rank, worker_id=worker_id)
+    main(world_size=world_size, rank=rank, batch_size=batch_size, target_versions=target_versions, worker_id=worker_id)
