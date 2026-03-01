@@ -4,8 +4,28 @@ import time
 import requests
 import torch
 import torch.nn.functional as F
-import uuid
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader, Subset
 from model import SimpleNet
+
+# ==========================================
+# USER CONFIGURATION
+# ==========================================
+# Define your universal Model and torchvision Dataset here.
+# The system will automatically shard this data among all workers.
+
+model = SimpleNet()
+
+# We use MNIST here as a standard torchvision dataset.
+# The transform converts PIL images to Tensors so the model can process them.
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.1307,), (0.3081,))
+])
+
+dataset = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+
+# ==========================================
 
 SERVER_URL = "http://localhost:8000"
 WORKER_PIN = None
@@ -58,84 +78,120 @@ def submit_gradients(worker_id, grads):
         print(f"Failed to submit gradients: {e}")
         return None
 
-def main():
-    worker_id = str(uuid.uuid4())[:8]
-    print(f"Worker {worker_id} starting...")
+def main(world_size: int, rank: int, worker_id: str):
+    print(f"\n🚀 Worker {worker_id} (Rank {rank}/{world_size-1}) starting...")
     
-    model = SimpleNet()
+    # ---------------------------------------------------------
+    # Universal Dataset Sharding (Data Parallelism)
+    # ---------------------------------------------------------
+    total_samples = len(dataset)
+    
+    # Generate a list of all indices in the dataset
+    all_indices = list(range(total_samples))
+    
+    # Slice the indices. This worker takes every Nth sample starting from its RANK.
+    # Ex: World_size=2. Rank 0 gets [0, 2, 4, 6...]. Rank 1 gets [1, 3, 5, 7...]
+    worker_indices = all_indices[rank :: world_size]
+    
+    # Create the subset specifically for this worker
+    worker_subset = Subset(dataset, worker_indices)
+    
+    # Load the subset into a DataLoader
+    batch_size = 16
+    dataloader = DataLoader(worker_subset, batch_size=batch_size, shuffle=True)
+    
+    print(f"📊 Dataset successfully sharded. This worker gets {len(worker_subset)}/{total_samples} samples.")
+    print("---------------------------------------------------------")
+    
     last_trained_version = -1
     
-    while True:
-        try:
-            # Check server's current version
-            current_version = get_server_version()
-            if current_version is None:
-                time.sleep(2)
-                continue
+    # Core Distributed Loop over the dataloader bounds
+    for batch_idx, (data, target) in enumerate(dataloader):
+        
+        while True:
+            try:
+                # Polling phase: Check server's current version
+                current_version = get_server_version()
+                if current_version is None:
+                    time.sleep(2)
+                    continue
+                    
+                # Crucial Synchronization Logic: 
+                # If the version hasn't incremented since our last training step, DO NOT process the batch.
+                if current_version == last_trained_version:
+                    time.sleep(0.5)
+                    continue
+                    
+                # Pull new target weights for this batch
+                version = pull_model(model)
+                if version is None:
+                    time.sleep(2)
+                    continue
                 
-            # Worker Synchronization: If the version hasn't changed since last pull, sleep and poll again
-            if current_version == last_trained_version:
-                print(f"Version {current_version} unchanged. Waiting (time.sleep(0.5))...")
-                time.sleep(0.5)
-                continue
+                # Forward Pass
+                output = model(data)
+                loss = F.cross_entropy(output, target)
                 
-            # Pull new model
-            version = pull_model(model)
-            if version is None:
-                time.sleep(2)
-                continue
+                # Backward Pass
+                model.zero_grad()
+                loss.backward()
                 
-            print(f"Worker {worker_id} pulled model version {version}. Training...")
-            
-            # Generate dummy image-like data and targets for 10 classes
-            x = torch.randn(16, 1, 28, 28)
-            target = torch.randint(0, 10, (16,))
-            
-            # Forward pass
-            output = model(x)
-            loss = F.cross_entropy(output, target)
-            
-            # Backward pass
-            model.zero_grad()
-            loss.backward()
-            
-            # Extract gradients mapping parameter name to the Tensor grad
-            grads = {name: param.grad for name, param in model.named_parameters()}
-            
-            # Submit to the Parameter Server
-            submit_gradients(worker_id, grads)
-            print(f"Worker {worker_id} submitted gradients for version {version}. Loss: {loss.item():.4f}")
-            
-            # Record that we've successfully trained on this version
-            last_trained_version = version
-            time.sleep(1.0) # Larger sleep to ensure free-tier ngrok doesn't drop
-            
-            # Bounding the training length for testing
-            if last_trained_version >= 10:
-                print(f"Worker {worker_id} reached 10 epochs. Terminating gracefully.")
+                # Extract gradients to standard Python objects natively
+                grads = {name: param.grad for name, param in model.named_parameters()}
+                
+                # Submit computed gradients to the Parameter Server
+                submit_gradients(worker_id, grads)
+                print(f"[Batch {batch_idx+1}] Worker {worker_id} submitted gradients for Version {version}. Loss: {loss.item():.4f}")
+                
+                # Record successful train step to prevent double-dipping the same weights
+                last_trained_version = version
+                time.sleep(1.0) # Pace for free-tier ngrok
+                
+                # Break the polling loop and move to the next batch of images
                 break
 
-            
-        except ConnectionError:
-            print("Could not connect to server, waiting...")
-            time.sleep(2)
-        except Exception as e:
-            print(f"Error during training loop: {e}")
-            time.sleep(2)
+            except ConnectionError:
+                print("Could not connect to server, waiting...")
+                time.sleep(2)
+            except Exception as e:
+                print(f"Error during training loop: {e}")
+                time.sleep(2)
+
+    print(f"\n🏁 Worker {worker_id} successfully finished processing its entire data shard.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parameter Worker")
     parser.add_argument("--pin", type=str, help="4-digit PIN for server authentication")
     args = parser.parse_args()
 
+    # 1. Authenticaton Logic
+    global WORKER_PIN
     if args.pin:
         WORKER_PIN = args.pin
     else:
         while True:
-            pin_input = input("Enter the 4-digit server PIN: ")
+            pin_input = input("🔑 Enter the 4-digit server PIN: ")
             if len(pin_input) == 4 and pin_input.isdigit():
                 WORKER_PIN = pin_input
                 break
             print("Invalid input. Please enter exactly 4 digits.")
             
-    main()
+    # 2. Universal Sharding Info Request
+    print("\n--- Distributed Setup ---")
+    while True:
+        try:
+            world_size = int(input("Enter WORLD_SIZE (Total number of workers, e.g., 2): "))
+            rank = int(input("Enter RANK (This worker's ID, starting from 0): "))
+            if rank >= world_size or rank < 0:
+                print("Invalid configuration. RANK must be between 0 and (WORLD_SIZE - 1).")
+                continue
+            break
+        except ValueError:
+            print("Please enter valid integers.")
+
+    # Generate a unique 8-character ID for tracking this specific worker process
+    import uuid
+    worker_id = str(uuid.uuid4())[:8]
+
+    # Execute universal loop
+    main(world_size=world_size, rank=rank, worker_id=worker_id)
