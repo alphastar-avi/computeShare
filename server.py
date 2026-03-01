@@ -33,7 +33,7 @@ def get_model():
     with lock:
         # Convert tensors to python lists for JSON serialization
         state_dict = {
-            k: v.cpu().numpy().tolist() for k, v in global_model.state_dict().items()
+            k: v.cpu().tolist() for k, v in global_model.state_dict().items()
         }
         return {"version": model_version, "weights": state_dict}
 
@@ -67,6 +67,11 @@ def submit_gradients(data: Gradients):
             # Increment the version and clear the gradient buffer safely
             model_version += 1
             gradient_buffer.clear()
+            
+            # Save the model gracefully once it hits 10 epochs
+            if model_version == 10:
+                torch.save(global_model.state_dict(), "trained_model.pth")
+                print("\n🎉 Training Complete! Saved weights to 'trained_model.pth'\n")
             
             return {
                 "status": "success", 

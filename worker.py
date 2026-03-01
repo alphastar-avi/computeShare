@@ -81,9 +81,9 @@ def main():
                 
             print(f"Worker {worker_id} pulled model version {version}. Training...")
             
-            # Generate dummy data and target
-            x = torch.randn(16, 10)
-            target = torch.randint(0, 2, (16,))
+            # Generate dummy image-like data and targets for 10 classes
+            x = torch.randn(16, 1, 28, 28)
+            target = torch.randint(0, 10, (16,))
             
             # Forward pass
             output = model(x)
@@ -102,6 +102,13 @@ def main():
             
             # Record that we've successfully trained on this version
             last_trained_version = version
+            time.sleep(1.0) # Larger sleep to ensure free-tier ngrok doesn't drop
+            
+            # Bounding the training length for testing
+            if last_trained_version >= 10:
+                print(f"Worker {worker_id} reached 10 epochs. Terminating gracefully.")
+                break
+
             
         except ConnectionError:
             print("Could not connect to server, waiting...")
