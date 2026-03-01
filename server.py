@@ -1,5 +1,7 @@
+import argparse
+import sys
 import threading
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Dict, Any, List
 import torch
@@ -13,6 +15,7 @@ global_model = SimpleNet()
 model_version = 0
 gradient_buffer = []
 BUFFER_SIZE = 2
+SERVER_PIN = None
 
 # Concurrency safety: Lock for endpoints that modify or read consistent state
 lock = threading.Lock()
@@ -21,14 +24,20 @@ class Gradients(BaseModel):
     worker_id: str
     grads: Dict[str, list]  # Enforces standard Python lists from workers
 
+def verify_pin(x_auth_pin: str = Header(None)):
+    """Dependency to check the authentication PIN."""
+    if x_auth_pin != SERVER_PIN:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid PIN")
+    return x_auth_pin
+
 @app.get("/version")
-def get_version():
+def get_version(pin: str = Depends(verify_pin)):
     """Returns the current model version."""
     with lock:
         return {"version": model_version}
 
 @app.get("/model")
-def get_model():
+def get_model(pin: str = Depends(verify_pin)):
     """Returns the current model weights and version."""
     with lock:
         # Convert tensors to python lists for JSON serialization
@@ -38,7 +47,7 @@ def get_model():
         return {"version": model_version, "weights": state_dict}
 
 @app.post("/submit_gradients")
-def submit_gradients(data: Gradients):
+def submit_gradients(data: Gradients, pin: str = Depends(verify_pin)):
     """
     Receives gradients from workers, buffers them until BUFFER_SIZE is reached,
     then averages them, updates the global model weights safely, and increments version.
@@ -82,4 +91,20 @@ def submit_gradients(data: Gradients):
     return {"status": "success", "message": "Gradients buffered"}
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Parameter Server")
+    parser.add_argument("--pin", type=str, help="4-digit PIN for authentication")
+    args = parser.parse_args()
+
+    # Dynamic PIN logic
+    if args.pin:
+        SERVER_PIN = args.pin
+    else:
+        while True:
+            pin_input = input("Set a 4-digit PIN for the server: ")
+            if len(pin_input) == 4 and pin_input.isdigit():
+                SERVER_PIN = pin_input
+                break
+            print("Invalid input. Please enter exactly 4 digits.")
+    
+    print(f"🔒 Server secured with PIN: {SERVER_PIN}")
     uvicorn.run(app, host="0.0.0.0", port=8000)

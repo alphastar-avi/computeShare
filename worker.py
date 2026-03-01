@@ -1,3 +1,5 @@
+import argparse
+import sys
 import time
 import requests
 import torch
@@ -6,11 +8,15 @@ import uuid
 from model import SimpleNet
 
 SERVER_URL = "http://localhost:8000"
+WORKER_PIN = None
+
+def get_headers():
+    return {"X-Auth-Pin": WORKER_PIN}
 
 def get_server_version():
     """Queries the parameter server for the current model version."""
     try:
-        response = requests.get(f"{SERVER_URL}/version")
+        response = requests.get(f"{SERVER_URL}/version", headers=get_headers())
         response.raise_for_status()
         return response.json()["version"]
     except Exception as e:
@@ -20,7 +26,7 @@ def get_server_version():
 def pull_model(model):
     """Pulls the latest weights and version from the parameter server."""
     try:
-        response = requests.get(f"{SERVER_URL}/model")
+        response = requests.get(f"{SERVER_URL}/model", headers=get_headers())
         response.raise_for_status()
         data = response.json()
         version = data["version"]
@@ -45,7 +51,7 @@ def submit_gradients(worker_id, grads):
     }
     
     try:
-        response = requests.post(f"{SERVER_URL}/submit_gradients", json=payload)
+        response = requests.post(f"{SERVER_URL}/submit_gradients", json=payload, headers=get_headers())
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -118,4 +124,19 @@ def main():
             time.sleep(2)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Parameter Worker")
+    parser.add_argument("--pin", type=str, help="4-digit PIN for server authentication")
+    args = parser.parse_args()
+
+    global WORKER_PIN
+    if args.pin:
+        WORKER_PIN = args.pin
+    else:
+        while True:
+            pin_input = input("Enter the 4-digit server PIN: ")
+            if len(pin_input) == 4 and pin_input.isdigit():
+                WORKER_PIN = pin_input
+                break
+            print("Invalid input. Please enter exactly 4 digits.")
+            
     main()
