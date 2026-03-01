@@ -100,15 +100,17 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
     worker_subset = Subset(dataset, worker_indices)
     
     # ---------------------------------------------------------
-    # Performance Optimization for macOS CPUs
+    # Performance Optimization for macOS Apple Silicon
     # ---------------------------------------------------------
-    # Maximize CPU core usage for the underlying math operations
-    torch.set_num_threads(4)
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    print(f"⚡ Hardware Acceleration: Running PyTorch on {device.type.upper()}")
+    
+    # Move the model to the GPU/MPS
+    model.to(device)
 
     # Load the subset into a DataLoader
-    # We add num_workers for parallel image loading.
-    # pin_memory is removed to suppress macOS MPS warnings.
-    dataloader = DataLoader(worker_subset, batch_size=batch_size, shuffle=True, num_workers=2)
+    # pin_memory helps speed up CPU -> MPS memory transfer
+    dataloader = DataLoader(worker_subset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
     
     print(f"📊 Dataset successfully sharded. This worker gets {len(worker_subset)}/{total_samples} samples.")
     print("---------------------------------------------------------")
@@ -137,6 +139,9 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
                 if version is None:
                     time.sleep(2)
                     continue
+                
+                # Move data and targets to the same device as the model (MPS)
+                data, target = data.to(device), target.to(device)
                 
                 # Forward Pass
                 output = model(data)
@@ -167,10 +172,19 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
                 print(f"Error during training loop: {e}")
                 time.sleep(2)
                 
-        # Check if we've reached the target number of global batches
+        # Check if we've successfully computed enough batches
         if last_trained_version >= target_versions:
-            print(f"\n✅ Worker {worker_id} successfully finished {target_versions} global training batches.")
-            break
+            print(f"\n⏳ Worker {worker_id} finished computing its {target_versions} global batches.")
+            print("Waiting for slower workers to finish so the server can combine them...")
+            
+            # The fast worker must stay alive and poll the server until the server 
+            # confirms the final global sync is complete, otherwise the slow worker hangs.
+            while True:
+                final_version = get_server_version()
+                if final_version is not None and final_version >= target_versions:
+                    print(f"\n✅ Server confirmed {target_versions} global epochs complete! Shutting down gracefully.")
+                    return # Exit the main function completely
+                time.sleep(1.0)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parameter Worker")
