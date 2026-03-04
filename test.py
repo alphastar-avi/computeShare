@@ -23,7 +23,7 @@ def evaluate_model():
         # Load the .pth file the server generated
         model.load_state_dict(torch.load("trained_model.pth", map_location=torch.device('cpu')))
     except FileNotFoundError:
-        print("\n❌ Error: 'trained_model.pth' not found.")
+        print("\n Error: 'trained_model.pth' not found.")
         print("You need to successfully finish the 10-epoch distributed training with you and Roshini first!")
         return
         

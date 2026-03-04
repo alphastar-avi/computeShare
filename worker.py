@@ -1,4 +1,4 @@
-import argparse
+`import argparse
 import sys
 import time
 import requests
@@ -103,7 +103,7 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
     # Performance Optimization for macOS Apple Silicon
     # ---------------------------------------------------------
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    print(f"⚡ Hardware Acceleration: Running PyTorch on {device.type.upper()}")
+    print(f"Hardware Acceleration: Running PyTorch on {device.type.upper()}")
     
     # Move the model to the GPU/MPS
     model.to(device)
@@ -112,7 +112,7 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
     # pin_memory throws a warning on MPS, so it has been removed.
     dataloader = DataLoader(worker_subset, batch_size=batch_size, shuffle=True, num_workers=2)
     
-    print(f"📊 Dataset successfully sharded. This worker gets {len(worker_subset)}/{total_samples} samples.")
+    print(f"Dataset successfully sharded. This worker gets {len(worker_subset)}/{total_samples} samples.")
     print("---------------------------------------------------------")
     
     last_trained_version = -1
@@ -131,11 +131,11 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
                 # Crucial Synchronization Logic: 
                 # If the version hasn't incremented since our last training step, DO NOT process the batch.
                 if current_version == last_trained_version:
-                    print(f"⏳ [Worker {worker_id}] Server Version {current_version} is unchanged. Waiting for other workers...")
+                    print(f"[Worker {worker_id}] Server Version {current_version} is unchanged. Waiting for other workers...")
                     time.sleep(0.5)
                     continue
                     
-                print(f"🔄 [Worker {worker_id}] New Server Version {current_version} detected! Pulling weights...")
+                print(f"[Worker {worker_id}] New Server Version {current_version} detected! Pulling weights...")
                 # Pull new target weights for this batch
                 version = pull_model(model)
                 if version is None:
@@ -163,9 +163,9 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
                 grads = {name: param.grad for name, param in model.named_parameters()}
                 
                 # Submit computed gradients to the Parameter Server
-                print(f"⬆️ [Worker {worker_id}] Computed Loss: {loss.item():.4f} for Batch {batch_idx+1}. Submitting gradients...")
+                print(f"[Worker {worker_id}] Computed Loss: {loss.item():.4f} for Batch {batch_idx+1}. Submitting gradients...")
                 submit_gradients(worker_id, grads)
-                print(f"✅ [Worker {worker_id}] Gradients submitted successfully for Server Version {version}!")
+                print(f"++++[Worker {worker_id}] Gradients submitted successfully for Server Version {version}!")
                 
                 # Record successful train step to prevent double-dipping the same weights
                 last_trained_version = version
@@ -183,7 +183,7 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
                 
         # Check if we've successfully computed enough batches
         if last_trained_version >= target_versions:
-            print(f"\n⏳ Worker {worker_id} finished computing its {target_versions} global batches.")
+            print(f"\nWorker {worker_id} finished computing its {target_versions} global batches.")
             print("Waiting for slower workers to finish so the server can combine them...")
             
             # The fast worker must stay alive and poll the server until the server 
@@ -191,7 +191,7 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
             while True:
                 final_version = get_server_version()
                 if final_version is not None and final_version >= target_versions:
-                    print(f"\n✅ Server confirmed {target_versions} global epochs complete! Shutting down gracefully.")
+                    print(f"\nServer confirmed {target_versions} global epochs complete! Shutting down gracefully.")
                     return # Exit the main function completely
                 time.sleep(1.0)
 
@@ -205,7 +205,7 @@ if __name__ == "__main__":
         WORKER_PIN = args.pin
     else:
         while True:
-            pin_input = input("🔑 Enter the 4-digit server PIN: ")
+            pin_input = input("Enter the 4-digit server PIN: ")
             if len(pin_input) == 4 and pin_input.isdigit():
                 WORKER_PIN = pin_input
                 break
@@ -235,3 +235,4 @@ if __name__ == "__main__":
 
     # Execute universal loop
     main(world_size=world_size, rank=rank, batch_size=batch_size, target_versions=target_versions, worker_id=worker_id)
+`

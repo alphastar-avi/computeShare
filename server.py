@@ -58,7 +58,7 @@ def submit_gradients(data: Gradients, pin: str = Depends(verify_pin)):
     global model_version
     with lock:
         gradient_buffer.append(data.grads)
-        print(f"📥 [Server] Received gradients from Worker {data.worker_id}. Buffer: {len(gradient_buffer)}/{BUFFER_SIZE}")
+        print(f" [Server] Received gradients from Worker {data.worker_id}. Buffer: {len(gradient_buffer)}/{BUFFER_SIZE}")
         
         # Check if we have received exactly BUFFER_SIZE (2) gradient submissions
         if len(gradient_buffer) == BUFFER_SIZE:
@@ -84,7 +84,7 @@ def submit_gradients(data: Gradients, pin: str = Depends(verify_pin)):
                     
             # Increment the version and clear the gradient buffer safely
             model_version += 1
-            print(f"✅ [Server] Global Model updated to Version {model_version}")
+            print(f"++++[Server] Global Model updated to Version {model_version}")
             gradient_buffer.clear()
             
             # Save the model gracefully once it hits TARGET_VERSIONS
