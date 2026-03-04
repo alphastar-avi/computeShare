@@ -1,7 +1,9 @@
 import argparse
 import sys
 import threading
-from fastapi import FastAPI, Header, HTTPException, Depends
+import io
+import gzip
+from fastapi import FastAPI, Header, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import Dict, Any, List
 import torch
@@ -22,10 +24,6 @@ SERVER_PIN = None
 
 # Concurrency safety: Lock for endpoints that modify or read consistent state
 lock = threading.Lock()
-
-class Gradients(BaseModel):
-    worker_id: str
-    grads: Dict[str, list]  # Enforces standard Python lists from workers
 
 def verify_pin(x_auth_pin: str = Header(None)):
     """Dependency to check the authentication PIN."""
@@ -50,15 +48,27 @@ def get_model(pin: str = Depends(verify_pin)):
         return {"version": model_version, "weights": state_dict}
 
 @app.post("/submit_gradients")
-def submit_gradients(data: Gradients, pin: str = Depends(verify_pin)):
+async def submit_gradients(request: Request, pin: str = Depends(verify_pin)):
     """
-    Receives gradients from workers, buffers them until BUFFER_SIZE is reached,
+    Receives compressed binary gradients from workers, buffers them until BUFFER_SIZE is reached,
     then averages them, updates the global model weights safely, and increments version.
     """
     global model_version
+    
+    worker_id = request.headers.get("X-Worker-Id", "unknown")
+    
+    try:
+        body = await request.body()
+        decompressed_data = gzip.decompress(body)
+        buffer = io.BytesIO(decompressed_data)
+        # We use weights_only=True to safely load the binary tensor payload buffer
+        worker_grads = torch.load(buffer, map_location="cpu", weights_only=True)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to decode binary payload: {e}")
+        
     with lock:
-        gradient_buffer.append(data.grads)
-        print(f" [Server] Received gradients from Worker {data.worker_id}. Buffer: {len(gradient_buffer)}/{BUFFER_SIZE}")
+        gradient_buffer.append(worker_grads)
+        print(f" [Server] Received gradients from Worker {worker_id}. Buffer: {len(gradient_buffer)}/{BUFFER_SIZE}")
         
         # Check if we have received exactly BUFFER_SIZE (2) gradient submissions
         if len(gradient_buffer) == BUFFER_SIZE:
@@ -66,8 +76,8 @@ def submit_gradients(data: Gradients, pin: str = Depends(verify_pin)):
             # Average the gradients
             avg_grads = {}
             for name in gradient_buffer[0].keys():
-                # Stack all worker gradients for the same parameter name
-                stacked = torch.tensor([worker_grads[name] for worker_grads in gradient_buffer])
+                # Stack all worker gradient tensors for the same parameter name
+                stacked = torch.stack([w_grads[name] for w_grads in gradient_buffer], dim=0)
                 # Compute the mean across workers
                 avg_grads[name] = torch.mean(stacked, dim=0)
 

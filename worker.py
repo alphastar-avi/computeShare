@@ -1,9 +1,11 @@
-`import argparse
+import argparse
 import sys
 import time
 import requests
 import torch
 import torch.nn.functional as F
+import io
+import gzip
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, Subset
 from model import SimpleNet
@@ -64,17 +66,28 @@ def pull_model(model):
         return None
 
 def submit_gradients(worker_id, grads):
-    """Submits the computed gradients to the parameter server in JSON-friendly format."""
-    # Convert grad tensors to standard Python lists for JSON serialization
-    grads_list = {k: v.cpu().tolist() for k, v in grads.items() if v is not None}
+    """Submits the computed gradients to the parameter server in compressed binary format."""
+    # Move tensors to CPU before serializing to avoid device-specific deserialization issues
+    cpu_grads = {k: v.cpu() for k, v in grads.items() if v is not None}
     
-    payload = {
-        "worker_id": worker_id,
-        "grads": grads_list
-    }
+    # Serialize to binary using PyTorch
+    buffer = io.BytesIO()
+    torch.save(cpu_grads, buffer)
+    
+    # Compress with gzip
+    compressed_payload = gzip.compress(buffer.getvalue())
+    
+    headers = get_headers()
+    headers["X-Worker-Id"] = worker_id
+    headers["Content-Encoding"] = "gzip"
+    headers["Content-Type"] = "application/octet-stream"
     
     try:
-        response = requests.post(f"{SERVER_URL}/submit_gradients", json=payload, headers=get_headers())
+        response = requests.post(
+            f"{SERVER_URL}/submit_gradients", 
+            data=compressed_payload, 
+            headers=headers
+        )
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -235,4 +248,3 @@ if __name__ == "__main__":
 
     # Execute universal loop
     main(world_size=world_size, rank=rank, batch_size=batch_size, target_versions=target_versions, worker_id=worker_id)
-`
