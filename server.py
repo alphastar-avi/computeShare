@@ -79,64 +79,47 @@ async def submit_gradients(request: Request, pin: str = Depends(verify_pin)):
         raise HTTPException(status_code=400, detail=f"Failed to decode binary payload: {e}")
         
     with lock:
-        gradient_buffer.append(worker_grads)
-        print(f" [Server] Received gradients from Worker {worker_id}. Buffer: {len(gradient_buffer)}/{BUFFER_SIZE}")
-        
-        # Check if we have received exactly BUFFER_SIZE (2) gradient submissions
-        if len(gradient_buffer) == BUFFER_SIZE:
-            print(f"⚙️ [Server] Buffer full! Averaging gradients from {BUFFER_SIZE} workers...")
-            # Average the gradients
-            avg_grads = {}
-            for name in gradient_buffer[0].keys():
-                # Stack all worker gradient tensors for the same parameter name
-                stacked = torch.stack([w_grads[name] for w_grads in gradient_buffer], dim=0)
-                # Compute the mean across workers
-                avg_grads[name] = torch.mean(stacked, dim=0)
+        # ASYNCHRONOUS SGD: Apply gradients immediately, do not wait for a buffer.
+        print(f"⚙️ [Server] Processing gradients from Worker {worker_id}...")
 
-            # PyTorch In-Place Update Fix: Use a real optimizer instead of manual subtraction.
-            # Manual subtraction causes unstable training, exploding gradients, and 10% accuracy.
-            optimizer.zero_grad()
-            for name, param in global_model.named_parameters():
-                if name in avg_grads:
-                    # Inject the averaged gradients directly into the global model's .grad attribute
-                    param.grad = avg_grads[name]
-                    
-            # Let PyTorch's native SGD (with momentum) safely update the parameters
-            optimizer.step()
-                    
-            # Increment the version and clear the gradient buffer safely
-            model_version += 1
-            print(f"++++[Server] Global Model updated to Version {model_version}")
-            gradient_buffer.clear()
-            
-            # Save the model gracefully once it hits TARGET_VERSIONS
-            if model_version >= TARGET_VERSIONS:
-                training_duration = time.time() - training_start_time
-                mb_received = total_bytes_received / (1024 * 1024)
+        optimizer.zero_grad()
+        for name, param in global_model.named_parameters():
+            if name in worker_grads:
+                # Inject the individual worker's gradients directly
+                param.grad = worker_grads[name]
                 
-                print("\n" + "-"*40)
-                print(" TRAINING SESSION METADATA")
-                print("-"*40)
-                print(f" Total Duration      : {training_duration:.2f} seconds")
-                print(f" Total Data Received : {mb_received:.4f} MB")
-                print(f" Global Epochs       : {TARGET_VERSIONS}")
-                print(f" Worker Count        : {BUFFER_SIZE}")
-                print("-"*40)
+        # Let PyTorch's native SGD safely update the parameters directly
+        optimizer.step()
                 
-                torch.save(global_model.state_dict(), "trained_model.pth")
-                print(" Saved weights to 'trained_model.pth'\n")
-                
-                # Forcefully shutdown the server so it stops responding to ghost/lagging workers
-                print("🏁 Training complete. Shutting down server...")
-                os._exit(0)
+        # Increment the version safely
+        model_version += 1
+        print(f"++++[Server] Global Model updated to Version {model_version}")
+        
+        # Save the model gracefully once it hits TARGET_VERSIONS
+        if model_version >= TARGET_VERSIONS:
+            training_duration = time.time() - training_start_time
+            mb_received = total_bytes_received / (1024 * 1024)
             
-            return {
-                "status": "success", 
-                "message": "Model updated", 
-                "new_version": model_version
-            }
+            print("\n" + "-"*40)
+            print(" TRAINING SESSION METADATA")
+            print("-"*40)
+            print(f" Total Duration      : {training_duration:.2f} seconds")
+            print(f" Total Data Received : {mb_received:.4f} MB")
+            print(f" Global Epochs       : {TARGET_VERSIONS}")
+            print("-" * 40)
             
-    return {"status": "success", "message": "Gradients buffered"}
+            torch.save(global_model.state_dict(), "trained_model.pth")
+            print(" Saved weights to 'trained_model.pth'\n")
+            
+            # Forcefully shutdown the server so it stops responding to ghost/lagging workers
+            print("🏁 Training complete. Shutting down server...")
+            os._exit(0)
+        
+        return {
+            "status": "success", 
+            "message": "Model updated", 
+            "new_version": model_version
+        }
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parameter Server")
@@ -157,13 +140,12 @@ if __name__ == "__main__":
     print("\n--- Server Configuration ---")
     while True:
         try:
-            BUFFER_SIZE = int(input("Enter WORLD_SIZE (Number of workers to wait for, e.g., 2): "))
-            TARGET_VERSIONS = int(input("Enter TOTAL_GLOBAL_BATCHES (Number of global averages to perform, e.g., 50): "))
-            if BUFFER_SIZE > 0 and TARGET_VERSIONS > 0:
+            TARGET_VERSIONS = int(input("Enter TOTAL_GLOBAL_BATCHES (Total individual worker updates to process, e.g., 50): "))
+            if TARGET_VERSIONS > 0:
                 break
-            print("Please enter positive integers.")
+            print("Please enter a positive integer.")
         except ValueError:
             print("Please enter valid integers.")
     
-    print(f" Server secured with PIN: {SERVER_PIN} | World Size: {BUFFER_SIZE} | Target Epochs: {TARGET_VERSIONS}")
+    print(f" Server secured with PIN: {SERVER_PIN} | Target Epochs/Updates: {TARGET_VERSIONS}")
     uvicorn.run(app, host="0.0.0.0", port=8000)

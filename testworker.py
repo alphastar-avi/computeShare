@@ -95,7 +95,7 @@ def submit_gradients(worker_id, grads):
         return None
 
 def main(world_size: int, rank: int, batch_size: int, target_versions: int, worker_id: str):
-    print(f"\n🚀 Worker {worker_id} (Rank {rank}/{world_size-1}) starting...")
+    print(f"\nWorker {worker_id} (Rank {rank}/{world_size-1}) starting...")
     
     # ---------------------------------------------------------
     # Universal Dataset Sharding (Data Parallelism)
