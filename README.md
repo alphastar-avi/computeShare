@@ -12,12 +12,30 @@ To drastically decrease network overhead (e.g., preventing Ngrok blocks), gradie
 
 All external HTTP communication is secured with a mandatory 4-digit PIN header.
 
+## Setup
+
+Before running the system, initialize the Python environment and install the required dependencies:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
 ## Usage Guide
 
 ### 1. Initialize the Parameter Server
-Designate one machine to act as the parameter server. 
+Designate one machine to act as the parameter server. The server can be initialized interactively or via inline arguments to bypass prompts.
+
+**Interactive Initialization:**
 ```bash
 python server.py --pin 1234
+```
+
+**Inline Initialization:**
+```bash
+python server.py --pinSizEpo <PIN> <WORLD_SIZE> <TOTAL_GLOBAL_BATCHES>
+# Example: python server.py --pinSizEpo 1234 2 50
 ```
 You will be prompted to define:
 - `WORLD_SIZE`: Total number of distributed workers.
@@ -27,11 +45,20 @@ You will be prompted to define:
 `npx -y localtunnel --port 8000`
 
 ### 2. Connect the Workers
-On any machine participating in the training, execute the worker script:
+On any machine participating in the training, execute the worker script.
+
+**Interactive Initialization:**
 ```bash
 python worker.py --pin 1234
 ```
-You will be prompted for:
+
+**Inline Initialization:**
+```bash
+python worker.py --pinSizRanBatEpo <PIN> <WORLD_SIZE> <RANK> <BATCH_SIZE> <TOTAL_GLOBAL_BATCHES>
+# Example: python worker.py --pinSizRanBatEpo 1234 2 0 32 50
+```
+
+Regardless of initialization method, workers require:
 - `WORLD_SIZE`: Must match the server configuration.
 - `RANK`: The worker's unique ID (0 to `WORLD_SIZE - 1`).
 - `BATCH_SIZE`: Number of images to process per forward pass.
