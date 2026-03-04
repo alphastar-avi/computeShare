@@ -5,10 +5,12 @@ ComputeShare is a lightweight federated machine learning system built for Apple 
 ## Architecture
 
 The system consists of two primary components:
-1. **Parameter Server (`server.py`)**: The central node that holds the global PyTorch model. It waits for workers to submit their computed gradients, mathematically averages them via SGD, and updates the global weights.
+1. **Parameter Server (`server.py`)**: The central node that holds the global PyTorch model. It asynchronously waits for workers to submit their computed gradients, decompresses the payload, mathematically averages them via SGD, and updates the global weights.
 2. **Workers (`worker.py`)**: Distributed clients that pull the latest model from the server, process a unique mathematical shard of the training dataset using their local GPU, and submit the calculated vectors back to the server.
 
-All HTTP communication is secured with a mandatory 4-digit PIN header.
+To drastically decrease network overhead (e.g., preventing Ngrok blocks), gradients are **not** serialized into JSON. The workers serialize their PyTorch tensors `io.BytesIO()`, compress them locally using `gzip`, and transmit the binary payload (`application/octet-stream`) via HTTP to the parameter server. 
+
+All external HTTP communication is secured with a mandatory 4-digit PIN header.
 
 ## Usage Guide
 

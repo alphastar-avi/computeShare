@@ -23,8 +23,8 @@ def evaluate_model():
         # Load the .pth file the server generated
         model.load_state_dict(torch.load("trained_model.pth", map_location=torch.device('cpu')))
     except FileNotFoundError:
-        print("\n Error: 'trained_model.pth' not found.")
-        print("You need to successfully finish the 10-epoch distributed training with you and Roshini first!")
+        print("\nError: 'trained_model.pth' not found.")
+        print("Model weights missing. Please execute the distributed training round first.")
         return
         
     # IMPORTANT: Set the model to evaluation mode (turns off Dropout/BatchNorm layers if any exist)
@@ -50,7 +50,7 @@ def evaluate_model():
             correct += (predicted == labels).sum().item()
             
     accuracy = 100 * correct / total
-    print(f"🎯 Total Accuracy on 10,000 never-before-seen images: {accuracy:.2f}%\n")
+    print(f" Total Accuracy on 10,000 never-before-seen images: {accuracy:.2f}%\n")
     
     # Let's inspect a few individual predictions directly
     print("--- Inspecting 5 Random Images ---")
@@ -65,11 +65,11 @@ def evaluate_model():
         actual = labels[i].item()
         
         if guess == actual:
-            status = "✅ Correct"
+            status = "Correct"
         else:
-            status = "❌ Wrong"
+            status = "Incorrect"
             
-        print(f"Image {i+1}: AI Guessed [{guess}] | Actual Answer [{actual}]  -> {status}")
+        print(f"Sample {i+1}: Model Prediction [{guess}] | Actual Label [{actual}]  -> {status}")
 
 if __name__ == "__main__":
     evaluate_model()

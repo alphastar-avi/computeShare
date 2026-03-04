@@ -13,3 +13,4 @@ trained_model.pth
 
 # macOS
 .DS_Store
+data/
