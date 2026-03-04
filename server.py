@@ -141,29 +141,35 @@ async def submit_gradients(request: Request, pin: str = Depends(verify_pin)):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parameter Server")
     parser.add_argument("--pin", type=str, help="4-digit PIN for authentication")
+    parser.add_argument("--pinSizEpo", nargs=3, help="Provide PIN, WORLD_SIZE, TOTAL_GLOBAL_BATCHES separated by space")
     args = parser.parse_args()
 
-    # Dynamic PIN logic
-    if args.pin:
-        SERVER_PIN = args.pin
+    if args.pinSizEpo:
+        SERVER_PIN = args.pinSizEpo[0]
+        BUFFER_SIZE = int(args.pinSizEpo[1])
+        TARGET_VERSIONS = int(args.pinSizEpo[2])
     else:
+        # Dynamic PIN logic
+        if args.pin:
+            SERVER_PIN = args.pin
+        else:
+            while True:
+                pin_input = input("Set a 4-digit PIN for the server: ")
+                if len(pin_input) == 4 and pin_input.isdigit():
+                    SERVER_PIN = pin_input
+                    break
+                print("Invalid input. Please enter exactly 4 digits.")
+                
+        print("\n--- Server Configuration ---")
         while True:
-            pin_input = input("Set a 4-digit PIN for the server: ")
-            if len(pin_input) == 4 and pin_input.isdigit():
-                SERVER_PIN = pin_input
-                break
-            print("Invalid input. Please enter exactly 4 digits.")
-            
-    print("\n--- Server Configuration ---")
-    while True:
-        try:
-            BUFFER_SIZE = int(input("Enter WORLD_SIZE (Number of workers to wait for, e.g., 2): "))
-            TARGET_VERSIONS = int(input("Enter TOTAL_GLOBAL_BATCHES (Number of global averages to perform, e.g., 50): "))
-            if BUFFER_SIZE > 0 and TARGET_VERSIONS > 0:
-                break
-            print("Please enter positive integers.")
-        except ValueError:
-            print("Please enter valid integers.")
+            try:
+                BUFFER_SIZE = int(input("Enter WORLD_SIZE (Number of workers to wait for, e.g., 2): "))
+                TARGET_VERSIONS = int(input("Enter TOTAL_GLOBAL_BATCHES (Number of global averages to perform, e.g., 50): "))
+                if BUFFER_SIZE > 0 and TARGET_VERSIONS > 0:
+                    break
+                print("Please enter positive integers.")
+            except ValueError:
+                print("Please enter valid integers.")
     
     print(f" Server secured with PIN: {SERVER_PIN} | World Size: {BUFFER_SIZE} | Target Epochs: {TARGET_VERSIONS}")
     uvicorn.run(app, host="0.0.0.0", port=8000)

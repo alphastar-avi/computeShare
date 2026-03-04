@@ -29,7 +29,7 @@ dataset = datasets.MNIST(root='./data', train=True, download=True, transform=tra
 
 # ==========================================
 
-SERVER_URL = "http://localhost:8000"
+SERVER_URL = "https://slow-papayas-wear.loca.lt"
 WORKER_PIN = None
 
 def get_headers():
