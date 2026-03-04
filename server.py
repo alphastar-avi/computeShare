@@ -3,6 +3,8 @@ import sys
 import threading
 import io
 import gzip
+import time
+import os
 from fastapi import FastAPI, Header, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import Dict, Any, List
@@ -24,6 +26,10 @@ SERVER_PIN = None
 
 # Concurrency safety: Lock for endpoints that modify or read consistent state
 lock = threading.Lock()
+
+# Metrics tracking
+training_start_time = None
+total_bytes_received = 0
 
 def verify_pin(x_auth_pin: str = Header(None)):
     """Dependency to check the authentication PIN."""
@@ -54,11 +60,17 @@ async def submit_gradients(request: Request, pin: str = Depends(verify_pin)):
     then averages them, updates the global model weights safely, and increments version.
     """
     global model_version
+    global training_start_time
+    global total_bytes_received
+    
+    if training_start_time is None:
+        training_start_time = time.time()
     
     worker_id = request.headers.get("X-Worker-Id", "unknown")
     
     try:
         body = await request.body()
+        total_bytes_received += len(body)
         decompressed_data = gzip.decompress(body)
         buffer = io.BytesIO(decompressed_data)
         # We use weights_only=True to safely load the binary tensor payload buffer
@@ -99,8 +111,24 @@ async def submit_gradients(request: Request, pin: str = Depends(verify_pin)):
             
             # Save the model gracefully once it hits TARGET_VERSIONS
             if model_version >= TARGET_VERSIONS:
+                training_duration = time.time() - training_start_time
+                mb_received = total_bytes_received / (1024 * 1024)
+                
+                print("\n" + "-"*40)
+                print(" TRAINING SESSION METADATA")
+                print("-"*40)
+                print(f" Total Duration      : {training_duration:.2f} seconds")
+                print(f" Total Data Received : {mb_received:.4f} MB")
+                print(f" Global Epochs       : {TARGET_VERSIONS}")
+                print(f" Worker Count        : {BUFFER_SIZE}")
+                print("-"*40)
+                
                 torch.save(global_model.state_dict(), "trained_model.pth")
-                print("\n Training Complete! Saved weights to 'trained_model.pth'\n")
+                print(" Saved weights to 'trained_model.pth'\n")
+                
+                # Forcefully shutdown the server so it stops responding to ghost/lagging workers
+                print("🏁 Training complete. Shutting down server...")
+                os._exit(0)
             
             return {
                 "status": "success", 
