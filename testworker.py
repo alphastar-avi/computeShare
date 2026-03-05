@@ -29,7 +29,7 @@ dataset = datasets.MNIST(root='./data', train=True, download=True, transform=tra
 
 # ==========================================
 
-SERVER_URL = "https://cool-worms-retire.loca.lt"
+SERVER_URL = "https://full-masks-itch.loca.lt"
 WORKER_PIN = None
 
 def get_headers():
@@ -163,14 +163,11 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
                 loss = F.cross_entropy(output, target)
                 
                 # Backward Pass
-                # IMPORTANT DISTRIBUTED MATH FIX: 
-                # We must scale the loss by World Size *before* computing gradients.
-                # Otherwise, when the Server averages them, the magnitude is mathematically blown out 
-                # (effectively multiplying the learning rate by the number of workers), destroying convergence.
-                scaled_loss = loss / world_size
+                # The Server already uses `torch.mean(dim=0)` to combine gradients, 
+                # so we DO NOT scale the loss here to avoid dividing the learning rate twice.
                 
                 model.zero_grad()
-                scaled_loss.backward()
+                loss.backward()
                 
                 # Extract gradients to standard Python objects natively
                 grads = {name: param.grad for name, param in model.named_parameters()}
