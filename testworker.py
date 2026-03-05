@@ -41,7 +41,7 @@ def get_headers():
 def get_server_version():
     """Queries the parameter server for the current model version."""
     try:
-        response = requests.get(f"{SERVER_URL}/version", headers=get_headers(), timeout=5)
+        response = requests.get(f"{SERVER_URL}/version", headers=get_headers(), timeout=15)
         response.raise_for_status()
         return response.json()["version"]
     except Exception:
@@ -50,7 +50,7 @@ def get_server_version():
 def pull_model(model):
     """Pulls the latest weights and version from the parameter server."""
     try:
-        response = requests.get(f"{SERVER_URL}/model", headers=get_headers(), timeout=10)
+        response = requests.get(f"{SERVER_URL}/model", headers=get_headers(), timeout=15)
         response.raise_for_status()
         data = response.json()
         version = data["version"]
@@ -86,7 +86,7 @@ def submit_gradients(worker_id, grads):
             f"{SERVER_URL}/submit_gradients", 
             data=compressed_payload, 
             headers=headers,
-            timeout=10
+            timeout=30
         )
         response.raise_for_status()
         return response.json()
