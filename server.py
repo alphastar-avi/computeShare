@@ -56,11 +56,10 @@ def get_model(pin: str = Depends(verify_pin)):
 
 @app.post("/submit_gradients")
 async def submit_gradients(request: Request, pin: str = Depends(verify_pin)):
+    """
     Receives compressed binary gradients from workers, buffers them until BUFFER_SIZE is reached,
     then averages them, updates the global model weights safely, and increments version.
     Crucially, rejects "Stale Gradients" from slow workers computing on outdated weights.
-    """
-    then averages them, updates the global model weights safely, and increments version.
     """
     global model_version
     global training_start_time
