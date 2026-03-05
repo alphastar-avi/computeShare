@@ -170,6 +170,7 @@ if __name__ == "__main__":
                     break
                 print("Please enter positive integers.")
             except ValueError:
+                print("Please enter valid integers.")
     print(f" Server secured with PIN: {SERVER_PIN} | World Size: {BUFFER_SIZE} | Target Epochs: {TARGET_VERSIONS}")
     
     # ---------------------------------------------------------
