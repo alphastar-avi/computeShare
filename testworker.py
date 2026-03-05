@@ -41,7 +41,7 @@ def get_headers():
 def get_server_version():
     """Queries the parameter server for the current model version."""
     try:
-        response = requests.get(f"{SERVER_URL}/version", headers=get_headers())
+        response = requests.get(f"{SERVER_URL}/version", headers=get_headers(), timeout=5)
         response.raise_for_status()
         return response.json()["version"]
     except Exception:
@@ -50,7 +50,7 @@ def get_server_version():
 def pull_model(model):
     """Pulls the latest weights and version from the parameter server."""
     try:
-        response = requests.get(f"{SERVER_URL}/model", headers=get_headers())
+        response = requests.get(f"{SERVER_URL}/model", headers=get_headers(), timeout=10)
         response.raise_for_status()
         data = response.json()
         version = data["version"]
@@ -85,7 +85,8 @@ def submit_gradients(worker_id, grads):
         response = requests.post(
             f"{SERVER_URL}/submit_gradients", 
             data=compressed_payload, 
-            headers=headers
+            headers=headers,
+            timeout=10
         )
         response.raise_for_status()
         return response.json()
@@ -177,7 +178,7 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
                 # Submit computed gradients to the Parameter Server
                 print(f"[Worker {worker_id}] Computed Loss: {loss.item():.4f} for Batch {batch_idx+1}. Submitting gradients...")
                 submit_gradients(worker_id, grads)
-                print(f"[Worker {worker_id}] Gradients submitted successfully for Server Version {version}")
+                print(f"+++++[Worker {worker_id}] Gradients submitted successfully for Server Version {version}+++")
                 
                 # Record successful train step to prevent double-dipping the same weights
                 last_trained_version = version
