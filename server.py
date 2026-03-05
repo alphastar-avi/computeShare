@@ -17,7 +17,8 @@ app = FastAPI()
 # Global state for Parameter Server
 # Global state for Parameter Server
 global_model = SimpleNet()
-optimizer = torch.optim.SGD(global_model.parameters(), lr=0.01, momentum=0.9)
+# Optimizer is initialized after WORLD_SIZE is known
+optimizer = None 
 model_version = 0
 gradient_buffer = []
 BUFFER_SIZE = 2
@@ -169,7 +170,16 @@ if __name__ == "__main__":
                     break
                 print("Please enter positive integers.")
             except ValueError:
-                print("Please enter valid integers.")
-    
     print(f" Server secured with PIN: {SERVER_PIN} | World Size: {BUFFER_SIZE} | Target Epochs: {TARGET_VERSIONS}")
+    
+    # ---------------------------------------------------------
+    # The Linear Scaling Rule
+    # ---------------------------------------------------------
+    # When you add more workers, the global batch size mathematically multiplies.
+    # To maintain the same learning velocity, we must multiply the Learning Rate by 
+    # the exact same factor (WORLD_SIZE).
+    scaled_lr = 0.01 * BUFFER_SIZE
+    optimizer = torch.optim.SGD(global_model.parameters(), lr=scaled_lr, momentum=0.9)
+    print(f" Scaled Learning Rate applied: {scaled_lr:.4f} (Base: 0.01 x {BUFFER_SIZE})")
+    
     uvicorn.run(app, host="0.0.0.0", port=8000)
