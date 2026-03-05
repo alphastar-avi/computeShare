@@ -84,7 +84,7 @@ async def submit_gradients(request: Request, pin: str = Depends(verify_pin)):
         
         # Check if we have received exactly BUFFER_SIZE (2) gradient submissions
         if len(gradient_buffer) == BUFFER_SIZE:
-            print(f"⚙️ [Server] Buffer full! Averaging gradients from {BUFFER_SIZE} workers...")
+            print(f"[Server] Buffer full! Averaging gradients from {BUFFER_SIZE} workers...")
             # Average the gradients
             avg_grads = {}
             for name in gradient_buffer[0].keys():
@@ -126,9 +126,9 @@ async def submit_gradients(request: Request, pin: str = Depends(verify_pin)):
                 torch.save(global_model.state_dict(), "trained_model.pth")
                 print(" Saved weights to 'trained_model.pth'\n")
                 
-                # Forcefully shutdown the server so it stops responding to ghost/lagging workers
-                print("🏁 Training complete. Shutting down server...")
-                os._exit(0)
+                # Gracefully shutdown the server after responding
+                print("Training complete. Shutting down server...")
+                threading.Timer(1.5, lambda: os._exit(0)).start()
             
             return {
                 "status": "success", 

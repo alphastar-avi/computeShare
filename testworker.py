@@ -29,7 +29,7 @@ dataset = datasets.MNIST(root='./data', train=True, download=True, transform=tra
 
 # ==========================================
 
-SERVER_URL = "https://slow-papayas-wear.loca.lt"
+SERVER_URL = "https://cool-worms-retire.loca.lt"
 WORKER_PIN = None
 
 def get_headers():
@@ -44,8 +44,7 @@ def get_server_version():
         response = requests.get(f"{SERVER_URL}/version", headers=get_headers())
         response.raise_for_status()
         return response.json()["version"]
-    except Exception as e:
-        print(f"Failed to get version: {e}")
+    except Exception:
         return None
 
 def pull_model(model):
@@ -95,7 +94,7 @@ def submit_gradients(worker_id, grads):
         return None
 
 def main(world_size: int, rank: int, batch_size: int, target_versions: int, worker_id: str):
-    print(f"\n🚀 Worker {worker_id} (Rank {rank}/{world_size-1}) starting...")
+    print(f"\nWorker {worker_id} (Rank {rank}/{world_size-1}) starting...")
     
     # ---------------------------------------------------------
     # Universal Dataset Sharding (Data Parallelism)
@@ -178,7 +177,7 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
                 # Submit computed gradients to the Parameter Server
                 print(f"[Worker {worker_id}] Computed Loss: {loss.item():.4f} for Batch {batch_idx+1}. Submitting gradients...")
                 submit_gradients(worker_id, grads)
-                print(f"++++[Worker {worker_id}] Gradients submitted successfully for Server Version {version}!")
+                print(f"[Worker {worker_id}] Gradients submitted successfully for Server Version {version}")
                 
                 # Record successful train step to prevent double-dipping the same weights
                 last_trained_version = version
@@ -195,7 +194,7 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
                 time.sleep(2)
                 
         # Check if we've successfully computed enough batches
-        if last_trained_version >= target_versions:
+        if last_trained_version >= target_versions - 1:
             print(f"\nWorker {worker_id} finished computing its {target_versions} global batches.")
             print("Waiting for slower workers to finish so the server can combine them...")
             
@@ -203,7 +202,10 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
             # confirms the final global sync is complete, otherwise the slow worker hangs.
             while True:
                 final_version = get_server_version()
-                if final_version is not None and final_version >= target_versions:
+                if final_version is None:
+                    print(f"\nServer offline. Assuming training is complete! Shutting down gracefully.")
+                    return
+                if final_version >= target_versions:
                     print(f"\nServer confirmed {target_versions} global epochs complete! Shutting down gracefully.")
                     return # Exit the main function completely
                 time.sleep(1.0)
