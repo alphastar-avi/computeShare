@@ -4,13 +4,15 @@ ComputeShare is a lightweight federated machine learning system built for Apple 
 
 ## Architecture
 
-The system consists of two primary components:
-1. **Parameter Server (`server.py`)**: The central node that holds the global PyTorch model. It asynchronously waits for workers to submit their computed gradients, decompresses the payload, mathematically averages them via SGD, and updates the global weights.
+The system consists of two primary components operating in a **Bulk Synchronous Parallel** formation:
+1. **Parameter Server (`server.py`)**: The central node that holds the global PyTorch model. It asynchronously waits for workers to submit their computed gradients, decompresses the payload, mathematically averages them via SGD, and updates the global weights. The server implements the **Linear Scaling Rule**, dynamically multiplying the learning rate by the total Worker `WORLD_SIZE` to prevent mathematical decay in multi-node clusters.
 2. **Workers (`worker.py`)**: Distributed clients that pull the latest model from the server, process a unique mathematical shard of the training dataset using their local GPU, and submit the calculated vectors back to the server.
 
-To drastically decrease network overhead (e.g., preventing Ngrok blocks), gradients are **not** serialized into JSON. The workers serialize their PyTorch tensors `io.BytesIO()`, compress them locally using `gzip`, and transmit the binary payload (`application/octet-stream`) via HTTP to the parameter server. 
-
-All external HTTP communication is secured with a mandatory 4-digit PIN header.
+### Safeties & Constraints
+- **Stale Gradients Rejection**: To prevent a slow worker from polluting the global weights, workers attach an `X-Worker-Version` HTTP header with their gradients. If the Server has already advanced to a new global version, it immediately mathematically rejects the slow worker's payload (`HTTP 409 Conflict`) and forces the worker to re-pull the new weights and recompute.
+- **Connection Continuity**: The workers leverage extended `requests` timeouts (15s/30s) to survive aggressive LocalTunnel connection spikes without experiencing process-ending timeout drops.
+- **Compression**: To drastically decrease network overhead (e.g., preventing Ngrok blocks), gradients are **not** serialized into JSON. The workers serialize their PyTorch tensors using `io.BytesIO()`, compress them locally via `gzip`, and transmit the binary payload (`application/octet-stream`).
+- **Authentication**: All external HTTP communication is secured with a mandatory 4-digit PIN header.
 
 ## Setup
 
