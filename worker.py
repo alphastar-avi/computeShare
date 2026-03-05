@@ -64,8 +64,8 @@ def pull_model(model):
         print(f"Failed to pull model: {e}")
         return None
 
-def submit_gradients(worker_id, grads):
-    """Submits the computed gradients to the parameter server in compressed binary format."""
+def submit_gradients(worker_id, grads, version):
+    """Submits computed gradients and the model version they were computed on."""
     # Move tensors to CPU before serializing to avoid device-specific deserialization issues
     cpu_grads = {k: v.cpu() for k, v in grads.items() if v is not None}
     
@@ -78,6 +78,7 @@ def submit_gradients(worker_id, grads):
     
     headers = get_headers()
     headers["X-Worker-Id"] = worker_id
+    headers["X-Worker-Version"] = str(version)
     headers["Content-Encoding"] = "gzip"
     headers["Content-Type"] = "application/octet-stream"
     
@@ -90,6 +91,13 @@ def submit_gradients(worker_id, grads):
         )
         response.raise_for_status()
         return response.json()
+    except requests.exceptions.HTTPError as err:
+        if err.response.status_code == 409:
+            print(f" [!] Server rejected submission: {err.response.json().get('detail', 'Stale gradients')}")
+            return "STALE"
+        else:
+            print(f"Failed to submit gradients (HTTP {err.response.status_code}): {e}")
+            return None
     except Exception as e:
         print(f"Failed to submit gradients: {e}")
         return None
@@ -174,7 +182,16 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
                 
                 # Submit computed gradients to the Parameter Server
                 print(f"[Worker {worker_id}] Computed Loss: {loss.item():.4f} for Batch {batch_idx+1}. Submitting gradients...")
-                submit_gradients(worker_id, grads)
+                result = submit_gradients(worker_id, grads, version)
+                
+                if result == "STALE":
+                    print(f"[Worker {worker_id}] Gradients were stale! The server advanced while we were computing. Re-pulling and retrying...")
+                    time.sleep(1.0)
+                    continue # Re-run the exact same batch with the new weights!
+                elif result is None:
+                    time.sleep(2)
+                    continue
+                    
                 print(f"\n+++++[Worker {worker_id}] Gradients submitted successfully for Server Version {version}+++")
                 
                 # Record successful train step to prevent double-dipping the same weights

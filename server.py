@@ -56,8 +56,10 @@ def get_model(pin: str = Depends(verify_pin)):
 
 @app.post("/submit_gradients")
 async def submit_gradients(request: Request, pin: str = Depends(verify_pin)):
-    """
     Receives compressed binary gradients from workers, buffers them until BUFFER_SIZE is reached,
+    then averages them, updates the global model weights safely, and increments version.
+    Crucially, rejects "Stale Gradients" from slow workers computing on outdated weights.
+    """
     then averages them, updates the global model weights safely, and increments version.
     """
     global model_version
@@ -68,7 +70,21 @@ async def submit_gradients(request: Request, pin: str = Depends(verify_pin)):
         training_start_time = time.time()
     
     worker_id = request.headers.get("X-Worker-Id", "unknown")
+    worker_version_str = request.headers.get("X-Worker-Version", "-1")
     
+    try:
+        worker_version = int(worker_version_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid X-Worker-Version header.")
+        
+    with lock:
+        # STRICT SYNCHRONOUS CHECK: 
+        # If a slow worker submits gradients computed on an OLD version of the model,
+        # we MUST mathematically reject them. Averaging stale gradients destroys the Linear Scaling Rule.
+        if worker_version != model_version:
+            print(f" [Server] REJECTED Stale Gradients from Worker {worker_id} (Worker Version: {worker_version} != Server Version: {model_version})")
+            raise HTTPException(status_code=409, detail="Stale gradients rejected. Please pull the latest model and recompute.")
+            
     try:
         body = await request.body()
         total_bytes_received += len(body)
@@ -80,6 +96,10 @@ async def submit_gradients(request: Request, pin: str = Depends(verify_pin)):
         raise HTTPException(status_code=400, detail=f"Failed to decode binary payload: {e}")
         
     with lock:
+        # Double check version inside the secondary lock before appending
+        if worker_version != model_version:
+            raise HTTPException(status_code=409, detail="Stale gradients rejected.")
+            
         gradient_buffer.append(worker_grads)
         print(f" [Server] Received gradients from Worker {worker_id}. Buffer: {len(gradient_buffer)}/{BUFFER_SIZE}")
         
