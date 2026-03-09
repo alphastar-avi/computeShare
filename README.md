@@ -1,6 +1,6 @@
-# ComputeShare: Distributed Mac Training
+# ComputeShare
 
-ComputeShare is a lightweight federated machine learning system built for Apple Silicon. It enables users to distribute PyTorch training tasks across multiple Macs over the internet, utilizing native MPS (Metal Performance Shaders) acceleration to split the workload and drastically reduce training time.
+ComputeShare is a lightweight federated machine learning training system with pytorch. It enables users to distribute PyTorch training tasks across multiple Macs over the internet, utilizing native MPS (Metal Performance Shaders) acceleration to split the workload and drastically reduce training time.
 
 ## Architecture
 
