@@ -79,7 +79,7 @@ python test.py --dataset MNIST
 ### Supported Datasets (`--dataset`)
 Any recognized `torchvision` dataset works dynamically without crashing, thanks to the **Universal Dataset Factory** in `utils.py`. The Factory acts as an intelligent API router that automatically resolves PyTorch's wildly inconsistent `train=True` vs `split='train'` kwargs, maps all topological class bounds so the MPS/Cuda device dynamically scales its final layers, and securely rejects multi-label datasets like *CelebA* before they initialize. 
 
-Furthermore, `test.py` no longer hardcodes "10,000" and will natively calculate the precise population volume of any validation shape processed. 
+Furthermore, the Factory features a **Dynamic Auto-Installer** that actively intercepts missing underlying dataset dependencies (e.g., PyTorch crashing because it needs `h5py` or `gdown` for PCAM) and iteratively installs them on the fly in the background via `pip`! `test.py` also no longer hardcodes "10,000" and will natively calculate the precise population volume of any validation shape processed. 
 
 **Ranked Performance Index**:
 *(Keep in mind, to keep bandwidth extremely low (< 50KB/sec), all input is mathematically shrunk to 28x28 grayscale tensors).*
@@ -101,6 +101,7 @@ Furthermore, `test.py` no longer hardcodes "10,000" and will natively calculate 
 - `CIFAR100` (100 classes of objects)
 - `StanfordCars` (Car Models - 196 Classes)
 - `PCAM` (Medical Cancer scans)
+- `EuroSAT` (Satellite Imagery - 10 Classes)
 - `Flowers102` (Flower Species - 102 Classes)
 - `OxfordIIITPet` (Pets - 37 Breeds)
 - `Places365` (Scenes/Places - 365 Classes)
