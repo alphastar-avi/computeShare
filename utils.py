@@ -34,6 +34,7 @@ DATASET_CONFIGS = {
     'Places365': {'classes': 365, 'train_arg': 'split', 'train_val': 'train', 'test_val': 'val'},
     'Country211': {'classes': 211, 'train_arg': 'split', 'train_val': 'train', 'test_val': 'test'},
     'FGVCAircraft': {'classes': 100, 'train_arg': 'split', 'train_val': 'train', 'test_val': 'test'},
+    'EuroSAT': {'classes': 10, 'train_arg': 'none'}, # Satellite imagery (89MB)
     
     # --- INCOMPATIBLE Datasets (Multi-label instead of single integer Output) ---
     'CelebA': {'incompatible': 'Outputs 40 binary labels. Requires BCEWithLogitsLoss architecture.'}
@@ -89,33 +90,48 @@ def get_dataset(dataset_name: str, root='./data', train=True, download=True):
     ])
     
     if not hasattr(datasets, dataset_name):
-        raise ValueError(f"Dataset '{dataset_name}' not natively found in torchvision.datasets. It may require an external library or manual download splitting.")
+        raise ValueError(f"Dataset '{dataset_name}' not natively found in torchvision.datasets.")
         
     dataset_class = getattr(datasets, dataset_name)
     
+    # 1. Base initialization arguments
+    kwargs = {'root': root, 'download': download, 'transform': transform}
+    
+    # 2. Apply Custom Factory Overrides
     if dataset_name in DATASET_CONFIGS:
         config = DATASET_CONFIGS[dataset_name]
         
-        # Guard against incompatible topologies instantly before GPU loads
         if 'incompatible' in config:
-            raise NotImplementedError(f"'{dataset_name}' is structurally incompatible with SimpleNet (Reason: {config['incompatible']})")
+            raise NotImplementedError(f"'{dataset_name}' is structurally incompatible: {config['incompatible']}")
             
-        kwargs = config.get('kwargs', {}).copy()
-        kwargs['root'] = root
-        kwargs['download'] = download
-        kwargs['transform'] = transform
-        
-        # Translate Standardized Calls (train=True/False) into Dataset-Specific Arguments!
+        # Merge extra internal kwargs (like EMNIST 'split')
+        if 'kwargs' in config:
+            kwargs.update(config['kwargs'])
+            
+        # Handle specialized Parameter Translation (train=True vs split='train')
         if config['train_arg'] == 'train':
             kwargs['train'] = config['train_val'] if train else config['test_val']
         elif config['train_arg'] == 'split':
             kwargs['split'] = config['train_val'] if train else config['test_val']
-            
-        return attempt_load_with_auto_install(dataset_class, kwargs, dataset_name)
-    else:
-        # Fallback to standard baseline initialization for unrecognized datasets
-        fallback_kwargs = {'root': root, 'train': train, 'download': download, 'transform': transform}
-        return attempt_load_with_auto_install(dataset_class, fallback_kwargs, dataset_name)
+        elif config['train_arg'] == 'none':
+            # Remove keys that the API doesn't support (e.g. EuroSAT)
+            kwargs.pop('download', None) # EuroSAT doesn't take a download flag in some versions
+            if 'train' in kwargs: del kwargs['train']
+
+    # 3. Load the data using our auto-installer wrapper
+    dataset = attempt_load_with_auto_install(dataset_class, kwargs, dataset_name)
+
+    # 4. Handle Datasets that LACK a native train/test split (Deterministic 80/20)
+    if dataset_name in DATASET_CONFIGS and DATASET_CONFIGS[dataset_name]['train_arg'] == 'none':
+        train_size = int(0.8 * len(dataset))
+        test_size = len(dataset) - train_size
+        # Using a FIXED generator seed ensures all workers/testers see the same non-overlapping images
+        train_ds, test_ds = torch.utils.data.random_split(
+            dataset, [train_size, test_size], generator=torch.Generator().manual_seed(42)
+        )
+        return train_ds if train else test_ds
+
+    return dataset
 
 def get_num_classes(dataset_name: str) -> int:
     """Dynamically resolves the EXACT output dimensionality needed for the network layer."""
