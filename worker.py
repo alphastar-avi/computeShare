@@ -52,11 +52,11 @@ def check_dataset_sync(dataset_name):
         response.raise_for_status()
         server_dataset = response.json()["dataset"]
         if server_dataset != dataset_name:
-            print(f"❌ Dataset mismatch! Server expects '{server_dataset}', but worker provided '{dataset_name}'.")
+            print(f"[X] Dataset mismatch! Server expects '{server_dataset}', but worker provided '{dataset_name}'.")
             sys.exit(1)
-        print(f"✅ Dataset successfully synced with Server: {server_dataset}")
+        print(f"[+] Dataset successfully synced with Server: {server_dataset}")
     except requests.exceptions.RequestException as e:
-        print(f"❌ Failed to check dataset sync with server: {e}")
+        print(f"[X] Failed to check dataset sync with server: {e}")
         sys.exit(1)
 
 def get_headers():
@@ -138,7 +138,7 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
     worker_start_time = time.time()
     successful_batches = 0
     
-    print(f"\n🚀 Worker {worker_id} (Rank {rank}/{world_size-1}) starting...")
+    print(f"\n[*] Worker {worker_id} (Rank {rank}/{world_size-1}) starting...")
     
     # Initialize Model and Dataset dynamically
     model = SimpleNet(num_classes=get_num_classes(dataset_name))
