@@ -1,4 +1,7 @@
 import torch
+import sys
+import subprocess
+import re
 from torchvision import datasets, transforms
 
 # Centralized Knowledge Base & Compatibility Map for Torchvision Datasets
@@ -36,6 +39,38 @@ DATASET_CONFIGS = {
     'CelebA': {'incompatible': 'Outputs 40 binary labels. Requires BCEWithLogitsLoss architecture.'}
 }
 
+def attempt_load_with_auto_install(dataset_class, kwargs, dataset_name):
+    """
+    Intelligently intercepts missing PyTorch dataset dependencies and auto-installs them via subprocess.
+    """
+    try:
+        return dataset_class(**kwargs)
+    except (RuntimeError, ModuleNotFoundError, ImportError) as e:
+        error_msg = str(e)
+        package_name = None
+        
+        # Scenario 1: PyTorch explicitly tells us to "pip install <X>"
+        match = re.search(r"pip install ([\w\-]+)", error_msg)
+        if match:
+            package_name = match.group(1)
+        # Scenario 2: Standard ModuleNotFoundError
+        elif isinstance(e, ModuleNotFoundError):
+            match = re.search(r"No module named '([\w\-]+)'", error_msg)
+            if match:
+                package_name = match.group(1)
+                
+        if package_name:
+            print(f"\n[*] Missing dependency detected for {dataset_name}. Auto-installing '{package_name}' on the fly...")
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+                print(f"[*] Successfully installed '{package_name}'. Retrying dataset initialization...\n")
+                return dataset_class(**kwargs)
+            except subprocess.CalledProcessError:
+                raise RuntimeError(f"Failed to auto-install '{package_name}'. Please install it manually.")
+                
+        # Re-raise if it's an unrelated error
+        raise e
+
 def get_dataset(dataset_name: str, root='./data', train=True, download=True):
     """
     Acts as a universal robust factory for Torchvision Datasets, intelligently rewriting parameters natively.
@@ -70,10 +105,11 @@ def get_dataset(dataset_name: str, root='./data', train=True, download=True):
         elif config['train_arg'] == 'split':
             kwargs['split'] = config['train_val'] if train else config['test_val']
             
-        return dataset_class(**kwargs)
+        return attempt_load_with_auto_install(dataset_class, kwargs, dataset_name)
     else:
         # Fallback to standard baseline initialization for unrecognized datasets
-        return dataset_class(root=root, train=train, download=download, transform=transform)
+        fallback_kwargs = {'root': root, 'train': train, 'download': download, 'transform': transform}
+        return attempt_load_with_auto_install(dataset_class, fallback_kwargs, dataset_name)
 
 def get_num_classes(dataset_name: str) -> int:
     """Dynamically resolves the EXACT output dimensionality needed for the network layer."""
