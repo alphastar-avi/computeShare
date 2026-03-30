@@ -1,23 +1,18 @@
+import argparse
 import torch
-from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from model import SimpleNet
+from utils import get_dataset, get_num_classes
 
-def evaluate_model():
-    print("Loading test dataset (10,000 images)...")
+def evaluate_model(dataset_name):
+    print(f"Loading test dataset '{dataset_name}'...")
     
-    # We must use the exact same transforms we used during training
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
-    ])
-    
-    # Load the official MNIST "test" split
-    dataset = datasets.MNIST(root='./data', train=False, download=True, transform=transform)
+    # Load the official "test" split dynamically using our utility
+    dataset = get_dataset(dataset_name, train=False)
     test_loader = DataLoader(dataset, batch_size=1000, shuffle=True)
     
     print("Loading your trained model weights...")
-    model = SimpleNet()
+    model = SimpleNet(num_classes=get_num_classes(dataset_name))
     
     try:
         # Load the .pth file the server generated
@@ -72,4 +67,8 @@ def evaluate_model():
         print(f"Sample {i+1}: Model Prediction [{guess}] | Actual Label [{actual}]  -> {status}")
 
 if __name__ == "__main__":
-    evaluate_model()
+    parser = argparse.ArgumentParser(description="Model Evaluator")
+    parser.add_argument("--dataset", type=str, default="MNIST", help="Torchvision dataset to test against")
+    args = parser.parse_args()
+    
+    evaluate_model(args.dataset)

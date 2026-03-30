@@ -6,31 +6,29 @@ import torch
 import torch.nn.functional as F
 import io
 import gzip
-from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, Subset
 from model import SimpleNet
+from utils import get_dataset, get_num_classes
 
 # ==========================================
-# USER CONFIGURATION
+# GLOBAL CONFIGURATION
 # ==========================================
-# Define your universal Model and torchvision Dataset here.
-# The system will automatically shard this data among all workers.
-
-model = SimpleNet()
-
-# We use MNIST here as a standard torchvision dataset.
-# The transform converts PIL images to Tensors so the model can process them.
-transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize((0.1307,), (0.3081,))
-])
-
-dataset = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
-
-# ==========================================
-
-SERVER_URL = "http://localhost:8000"
+SERVER_URL = "http://localhost:8000" #"http://172.20.10.2:8000"
 WORKER_PIN = None
+
+def check_dataset_sync(dataset_name):
+    """Checks if the worker's dataset matches the server's dataset."""
+    try:
+        response = requests.get(f"{SERVER_URL}/dataset_info", headers=get_headers())
+        response.raise_for_status()
+        server_dataset = response.json()["dataset"]
+        if server_dataset != dataset_name:
+            print(f"❌ Dataset mismatch! Server expects '{server_dataset}', but worker provided '{dataset_name}'.")
+            sys.exit(1)
+        print(f"✅ Dataset successfully synced with Server: {server_dataset}")
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Failed to check dataset sync with server: {e}")
+        sys.exit(1)
 
 def get_headers():
     return {
@@ -102,8 +100,12 @@ def submit_gradients(worker_id, grads, version):
         print(f"Failed to submit gradients: {e}")
         return None
 
-def main(world_size: int, rank: int, batch_size: int, target_versions: int, worker_id: str):
-    print(f"\n Worker {worker_id} (Rank {rank}/{world_size-1}) starting...")
+def main(world_size: int, rank: int, batch_size: int, target_versions: int, worker_id: str, dataset_name: str):
+    print(f"\n🚀 Worker {worker_id} (Rank {rank}/{world_size-1}) starting...")
+    
+    # Initialize Model and Dataset dynamically
+    model = SimpleNet(num_classes=get_num_classes(dataset_name))
+    dataset = get_dataset(dataset_name, train=True)
     
     # ---------------------------------------------------------
     # Universal Dataset Sharding (Data Parallelism)
@@ -228,8 +230,11 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parameter Worker")
     parser.add_argument("--pin", type=str, help="4-digit PIN for server authentication")
+    parser.add_argument("--dataset", type=str, default="MNIST", help="Torchvision dataset to use")
     parser.add_argument("--pinSizRanBatEpo", nargs=5, help="Provide PIN, WORLD_SIZE, RANK, BATCH_SIZE, TOTAL_GLOBAL_BATCHES separated by space")
     args = parser.parse_args()
+    
+    worker_dataset = args.dataset
 
     if args.pinSizRanBatEpo:
         WORKER_PIN = args.pinSizRanBatEpo[0]
@@ -271,5 +276,8 @@ if __name__ == "__main__":
     import uuid
     worker_id = str(uuid.uuid4())[:8]
 
+    # Check Dataset Sync
+    check_dataset_sync(worker_dataset)
+
     # Execute universal loop
-    main(world_size=world_size, rank=rank, batch_size=batch_size, target_versions=target_versions, worker_id=worker_id)
+    main(world_size=world_size, rank=rank, batch_size=batch_size, target_versions=target_versions, worker_id=worker_id, dataset_name=worker_dataset)

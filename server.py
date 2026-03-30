@@ -11,6 +11,7 @@ from typing import Dict, Any, List
 import torch
 import uvicorn
 from model import SimpleNet
+from utils import get_num_classes
 
 app = FastAPI()
 
@@ -43,6 +44,12 @@ def get_version(pin: str = Depends(verify_pin)):
     """Returns the current model version."""
     with lock:
         return {"version": model_version}
+
+@app.get("/dataset_info")
+def get_dataset_info(pin: str = Depends(verify_pin)):
+    """Returns the dataset currently configured on the server."""
+    with lock:
+        return {"dataset": SERVER_DATASET}
 
 @app.get("/model")
 def get_model(pin: str = Depends(verify_pin)):
@@ -161,8 +168,14 @@ async def submit_gradients(request: Request, pin: str = Depends(verify_pin)):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parameter Server")
     parser.add_argument("--pin", type=str, help="4-digit PIN for authentication")
+    parser.add_argument("--dataset", type=str, default="MNIST", help="Torchvision dataset to use (e.g. MNIST, FashionMNIST)")
     parser.add_argument("--pinSizEpo", nargs=3, help="Provide PIN, WORLD_SIZE, TOTAL_GLOBAL_BATCHES separated by space")
     args = parser.parse_args()
+
+    # Apply Dataset Configuration
+    SERVER_DATASET = args.dataset
+    global_model = SimpleNet(num_classes=get_num_classes(SERVER_DATASET))
+    optimizer = torch.optim.SGD(global_model.parameters(), lr=0.01, momentum=0.9)
 
     if args.pinSizEpo:
         SERVER_PIN = args.pinSizEpo[0]
@@ -190,7 +203,7 @@ if __name__ == "__main__":
                 print("Please enter positive integers.")
             except ValueError:
                 print("Please enter valid integers.")
-    print(f" Server secured with PIN: {SERVER_PIN} | World Size: {BUFFER_SIZE} | Target Epochs: {TARGET_VERSIONS}")
+    print(f" Server secured with PIN: {SERVER_PIN} | World Size: {BUFFER_SIZE} | Target Epochs: {TARGET_VERSIONS} | Dataset: {SERVER_DATASET}")
     
     # ---------------------------------------------------------
     # The Linear Scaling Rule

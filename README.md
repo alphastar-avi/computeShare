@@ -31,17 +31,18 @@ Designate one machine to act as the parameter server. The server can be initiali
 
 **Interactive Initialization:**
 ```bash
-python server.py --pin 1234
+python server.py --dataset MNIST --pin 1234
 ```
 
 **Inline Initialization:**
 ```bash
-python server.py --pinSizEpo <PIN> <WORLD_SIZE> <TOTAL_GLOBAL_BATCHES>
-# Example: python server.py --pinSizEpo 1234 2 50
+python server.py --dataset MNIST --pinSizEpo <PIN> <WORLD_SIZE> <TOTAL_GLOBAL_BATCHES>
+# Example: python server.py --dataset FashionMNIST --pinSizEpo 1234 2 50
 ```
 You will be prompted to define:
 - `WORLD_SIZE`: Total number of distributed workers.
 - `TOTAL_GLOBAL_BATCHES`: The number of gradient averaging rounds before the model is saved.
+- `--dataset`: The dataset to use (e.g., `MNIST`, `FashionMNIST`, `CIFAR10`). Default is `MNIST`.
 
 *Note: For external connections, expose port 8000 using LocalTunnel:* 
 `npx -y localtunnel --port 8000`
@@ -51,13 +52,13 @@ On any machine participating in the training, execute the worker script.
 
 **Interactive Initialization:**
 ```bash
-python worker.py --pin 1234
+python worker.py --dataset MNIST --pin 1234
 ```
 
 **Inline Initialization:**
 ```bash
-python worker.py --pinSizRanBatEpo <PIN> <WORLD_SIZE> <RANK> <BATCH_SIZE> <TOTAL_GLOBAL_BATCHES>
-# Example: python worker.py --pinSizRanBatEpo 1234 2 0 32 50
+python worker.py --dataset MNIST --pinSizRanBatEpo <PIN> <WORLD_SIZE> <RANK> <BATCH_SIZE> <TOTAL_GLOBAL_BATCHES>
+# Example: python worker.py --dataset FashionMNIST --pinSizRanBatEpo 1234 2 0 32 50
 ```
 
 Regardless of initialization method, workers require:
@@ -71,5 +72,15 @@ Regardless of initialization method, workers require:
 ### 3. Evaluate the Model
 Once the server reaches the target global batches, it will save the final weights to `trained_model.pth`. Execute the testing script to evaluate its accuracy on 10,000 novel images:
 ```bash
-python test.py
+python test.py --dataset MNIST
 ```
+
+### Supported Datasets (`--dataset`)
+Any `torchvision` dataset works thanks to automatic dynamic resizing and grayscale padding in `utils.py`. The most common options are:
+- `MNIST` (Default - Handwritten digits)
+- `FashionMNIST` (Articles of clothing)
+- `KMNIST` (Kuzushiji characters)
+- `EMNIST` (Extended digits/letters)
+- `QMNIST` (Extended MNIST)
+- `CIFAR10` (Auto-converted 10 classes of objects)
+- `CIFAR100` (Auto-converted 100 classes of objects)
