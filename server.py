@@ -172,6 +172,7 @@ async def submit_gradients(request: Request, pin: str = Depends(verify_pin)):
                 
                 # Gracefully shutdown the server after responding
                 print("Training complete. Shutting down server...")
+                print_training_metadata()
                 threading.Timer(1.5, lambda: os._exit(0)).start()
             
             return {

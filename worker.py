@@ -179,6 +179,7 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
     
     # Core Distributed Loop over the dataloader bounds
     for batch_idx, (data, target) in enumerate(dataloader):
+        consecutive_failures = 0
         
         while True:
             try:
@@ -241,18 +242,23 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
                 # Break the polling loop and move to the next batch of images
                 break
 
-            except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as e:
-                # Catch actual network disconnects or LocalTunnel 502/504 errors
-                print(f"\n[!] Connection lost or Tunnel died: {e}")
-                
-                # Use a blocking input prompt directly inside the polling loop!
-                # This gracefully holds the entire batch inside the GPU without crashing.
-                user_input = input("Enter 'r' to retry, or paste a NEW Server URL (https://...): ").strip()
-                if user_input.startswith("http"):
-                    SERVER_URL = user_input
-                    print(f"[*] Updated Parameter Server URL successfully: {SERVER_URL}")
-                # Continue re-executing this exact mathematical batch!
-                continue
+            except requests.exceptions.RequestException as e:
+                # Catch broad network timeouts and Localtunnel 502/503/504s seamlessly
+                consecutive_failures += 1
+                if consecutive_failures <= 3:
+                    print(f"\n[!] Tunnel unstable: {e}")
+                    print(f"    Auto-retrying in 3 seconds... (Attempt {consecutive_failures}/3)")
+                    time.sleep(3.0)
+                    continue
+                else:
+                    print(f"\n[!] Localtunnel decisively crashed: {e}")
+                    # Use a blocking input prompt directly inside the polling loop!
+                    user_input = input("    Enter 'r' to retry, or paste a NEW Server URL (https://...): ").strip()
+                    if user_input.startswith("http"):
+                        SERVER_URL = user_input
+                        print(f"[*] Updated Parameter Server URL successfully: {SERVER_URL}")
+                    consecutive_failures = 0 # Reset failures for the new attempt/tunnel
+                    continue
             except Exception as e:
                 print(f"Error during training loop: {e}")
                 time.sleep(2)
