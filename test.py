@@ -44,8 +44,11 @@ def evaluate_model(dataset_name):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
             
-    accuracy = 100 * correct / total
-    print(f" Total Accuracy on 10,000 never-before-seen images: {accuracy:.2f}%\n")
+    if total > 0:
+        accuracy = 100 * correct / total
+        print(f" Total Accuracy on {total:,} never-before-seen images: {accuracy:.2f}%\n")
+    else:
+        print(" Error: Test dataset is completely empty!\n")
     
     # Let's inspect a few individual predictions directly
     print("--- Inspecting 5 Random Images ---")
