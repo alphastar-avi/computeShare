@@ -11,9 +11,18 @@ from typing import Dict, Any, List
 import torch
 import uvicorn
 from model import SimpleNet
+from contextlib import asynccontextmanager
 from utils import get_num_classes
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Setup phase (nothing needed yet)
+    yield
+    # Shutdown phase
+    print("\n[Server] Shutting down gracefully...")
+    print_training_metadata()
+
+app = FastAPI(lifespan=lifespan)
 
 # Global state for Parameter Server
 # Global state for Parameter Server
@@ -38,6 +47,26 @@ def verify_pin(x_auth_pin: str = Header(None)):
     if x_auth_pin != SERVER_PIN:
         raise HTTPException(status_code=401, detail="Unauthorized: Invalid PIN")
     return x_auth_pin
+
+def print_training_metadata():
+    """Calculates and safely prints the final training session metrics."""
+    global training_start_time
+    global total_bytes_received
+    
+    if training_start_time is None:
+        return
+        
+    training_duration = time.time() - training_start_time
+    mb_received = total_bytes_received / (1024 * 1024)
+    
+    print("\n" + "-"*40)
+    print(" 📊 TRAINING SESSION METADATA (SERVER)")
+    print("-" * 40)
+    print(f" Total Duration      : {training_duration:.2f} seconds")
+    print(f" Total Data Received : {mb_received:.4f} MB")
+    print(f" Global Epochs       : {model_version}/{TARGET_VERSIONS}")
+    print(f" Worker Count        : {BUFFER_SIZE}")
+    print("-" * 40 + "\n")
 
 @app.get("/version")
 def get_version(pin: str = Depends(verify_pin)):
@@ -138,18 +167,6 @@ async def submit_gradients(request: Request, pin: str = Depends(verify_pin)):
             
             # Save the model gracefully once it hits TARGET_VERSIONS
             if model_version >= TARGET_VERSIONS:
-                training_duration = time.time() - training_start_time
-                mb_received = total_bytes_received / (1024 * 1024)
-                
-                print("\n" + "-"*40)
-                print(" TRAINING SESSION METADATA")
-                print("-"*40)
-                print(f" Total Duration      : {training_duration:.2f} seconds")
-                print(f" Total Data Received : {mb_received:.4f} MB")
-                print(f" Global Epochs       : {TARGET_VERSIONS}")
-                print(f" Worker Count        : {BUFFER_SIZE}")
-                print("-"*40)
-                
                 torch.save(global_model.state_dict(), "trained_model.pth")
                 print(" Saved weights to 'trained_model.pth'\n")
                 
