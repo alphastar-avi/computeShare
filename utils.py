@@ -42,34 +42,40 @@ DATASET_CONFIGS = {
 def attempt_load_with_auto_install(dataset_class, kwargs, dataset_name):
     """
     Intelligently intercepts missing PyTorch dataset dependencies and auto-installs them via subprocess.
+    Uses an iterative loop to handle cascading dependencies (e.g. PCAM requires both h5py AND gdown sequentially).
     """
-    try:
-        return dataset_class(**kwargs)
-    except (RuntimeError, ModuleNotFoundError, ImportError) as e:
-        error_msg = str(e)
-        package_name = None
-        
-        # Scenario 1: PyTorch explicitly tells us to "pip install <X>"
-        match = re.search(r"pip install ([\w\-]+)", error_msg)
-        if match:
-            package_name = match.group(1)
-        # Scenario 2: Standard ModuleNotFoundError
-        elif isinstance(e, ModuleNotFoundError):
-            match = re.search(r"No module named '([\w\-]+)'", error_msg)
+    max_retries = 3
+    retries = 0
+    
+    while retries < max_retries:
+        try:
+            return dataset_class(**kwargs)
+        except (RuntimeError, ModuleNotFoundError, ImportError) as e:
+            error_msg = str(e)
+            package_name = None
+            
+            # Scenario 1: PyTorch explicitly tells us to "pip install <X>"
+            match = re.search(r"pip install ([\w\-]+)", error_msg)
             if match:
                 package_name = match.group(1)
-                
-        if package_name:
-            print(f"\n[*] Missing dependency detected for {dataset_name}. Auto-installing '{package_name}' on the fly...")
-            try:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
-                print(f"[*] Successfully installed '{package_name}'. Retrying dataset initialization...\n")
-                return dataset_class(**kwargs)
-            except subprocess.CalledProcessError:
-                raise RuntimeError(f"Failed to auto-install '{package_name}'. Please install it manually.")
-                
-        # Re-raise if it's an unrelated error
-        raise e
+            # Scenario 2: Standard ModuleNotFoundError
+            elif isinstance(e, ModuleNotFoundError):
+                match = re.search(r"No module named '([\w\-]+)'", error_msg)
+                if match:
+                    package_name = match.group(1)
+                    
+            if package_name:
+                print(f"\n[*] Missing dependency detected for {dataset_name}. Auto-installing '{package_name}' on the fly...")
+                try:
+                    subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+                    print(f"[*] Successfully installed '{package_name}'. Retrying dataset initialization...\n")
+                    retries += 1
+                    continue # Re-run the while loop with the newly injected site-packages!
+                except subprocess.CalledProcessError:
+                    raise RuntimeError(f"Failed to auto-install '{package_name}'. Please install it manually.")
+                    
+            # Re-raise if it's an unrelated mathematical error
+            raise e
 
 def get_dataset(dataset_name: str, root='./data', train=True, download=True):
     """
