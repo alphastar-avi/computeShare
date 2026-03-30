@@ -44,8 +44,9 @@ You will be prompted to define:
 - `TOTAL_GLOBAL_BATCHES`: The number of gradient averaging rounds before the model is saved.
 - `--dataset`: The dataset to use (e.g., `MNIST`, `FashionMNIST`, `CIFAR10`). Default is `MNIST`.
 
-*Note: For external connections, expose port 8000 using LocalTunnel:* 
-`npx -y localtunnel --port 8000`
+*Note: For external connections over the internet, we highly recommend exposing port 8000 using a Free Cloudflare Tunnel for maximum speed and stability:*
+`npx cloudflared tunnel --url http://localhost:8000`
+*(Alternatively, if all Macs are on the exact same Wi-Fi/Shared Network, simply use the server's Local IP Address `http://192.168.x.x:8000` natively without any tunnels for zero-latency setups!)*
 
 ### 2. Connect the Workers
 On any machine participating in the training, execute the worker script.
