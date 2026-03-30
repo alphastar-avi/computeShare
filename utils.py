@@ -114,9 +114,9 @@ def get_dataset(dataset_name: str, root='./data', train=True, download=True):
         elif config['train_arg'] == 'split':
             kwargs['split'] = config['train_val'] if train else config['test_val']
         elif config['train_arg'] == 'none':
-            # Remove keys that the API doesn't support (e.g. EuroSAT)
-            kwargs.pop('download', None) # EuroSAT doesn't take a download flag in some versions
-            if 'train' in kwargs: del kwargs['train']
+            # Remove train/split keys since the API doesn't support them, but keep `download=True`!
+            kwargs.pop('train', None)
+            kwargs.pop('split', None)
 
     # 3. Load the data using our auto-installer wrapper
     dataset = attempt_load_with_auto_install(dataset_class, kwargs, dataset_name)
