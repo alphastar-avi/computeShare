@@ -6,31 +6,58 @@ import torch
 import torch.nn.functional as F
 import io
 import gzip
-from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, Subset
 from model import SimpleNet
+from utils import get_dataset, get_num_classes
 
 # ==========================================
-# USER CONFIGURATION
+# GLOBAL CONFIGURATION
 # ==========================================
-# Define your universal Model and torchvision Dataset here.
-# The system will automatically shard this data among all workers.
-
-model = SimpleNet()
-
-# We use MNIST here as a standard torchvision dataset.
-# The transform converts PIL images to Tensors so the model can process them.
-transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize((0.1307,), (0.3081,))
-])
-
-dataset = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
-
-# ==========================================
-
-SERVER_URL = "http://localhost:8000"
+SERVER_URL = "http://localhost:8000" #"http://172.20.10.2:8000"
 WORKER_PIN = None
+
+# Metrics tracking
+worker_start_time = None
+total_bytes_sent = 0
+successful_batches = 0
+
+def print_worker_metadata(target_versions=None):
+    """Calculates and safely prints the final worker session metrics."""
+    global worker_start_time
+    global total_bytes_sent
+    global successful_batches
+    
+    if worker_start_time is None:
+        return
+        
+    training_duration = time.time() - worker_start_time
+    mb_sent = total_bytes_sent / (1024 * 1024)
+    
+    epochs_str = str(successful_batches)
+    if target_versions:
+        epochs_str += f"/{target_versions}"
+        
+    print("\n" + "-"*40)
+    print(" 📊 WORKER TRAINING METADATA")
+    print("-" * 40)
+    print(f" Total Duration     : {training_duration:.2f} seconds")
+    print(f" Total Data Uploaded: {mb_sent:.4f} MB")
+    print(f" Completed Batches  : {epochs_str}")
+    print("-" * 40 + "\n")
+
+def check_dataset_sync(dataset_name):
+    """Checks if the worker's dataset matches the server's dataset."""
+    try:
+        response = requests.get(f"{SERVER_URL}/dataset_info", headers=get_headers())
+        response.raise_for_status()
+        server_dataset = response.json()["dataset"]
+        if server_dataset != dataset_name:
+            print(f"[X] Dataset mismatch! Server expects '{server_dataset}', but worker provided '{dataset_name}'.")
+            sys.exit(1)
+        print(f"[+] Dataset successfully synced with Server: {server_dataset}")
+    except requests.exceptions.RequestException as e:
+        print(f"[X] Failed to check dataset sync with server: {e}")
+        sys.exit(1)
 
 def get_headers():
     return {
@@ -44,8 +71,8 @@ def get_server_version():
         response = requests.get(f"{SERVER_URL}/version", headers=get_headers(), timeout=15)
         response.raise_for_status()
         return response.json()["version"]
-    except Exception:
-        return None
+    except requests.exceptions.RequestException as e:
+        raise e
 
 def pull_model(model):
     """Pulls the latest weights and version from the parameter server."""
@@ -60,12 +87,13 @@ def pull_model(model):
         state_dict = {k: torch.tensor(v) for k, v in weights.items()}
         model.load_state_dict(state_dict)
         return version
-    except Exception as e:
-        print(f"Failed to pull model: {e}")
-        return None
+    except requests.exceptions.RequestException as e:
+        raise e
 
 def submit_gradients(worker_id, grads, version):
     """Submits computed gradients and the model version they were computed on."""
+    global total_bytes_sent
+    
     # Move tensors to CPU before serializing to avoid device-specific deserialization issues
     cpu_grads = {k: v.cpu() for k, v in grads.items() if v is not None}
     
@@ -75,6 +103,7 @@ def submit_gradients(worker_id, grads, version):
     
     # Compress with gzip
     compressed_payload = gzip.compress(buffer.getvalue())
+    payload_size = len(compressed_payload)
     
     headers = get_headers()
     headers["X-Worker-Id"] = worker_id
@@ -90,20 +119,30 @@ def submit_gradients(worker_id, grads, version):
             timeout=30
         )
         response.raise_for_status()
+        total_bytes_sent += payload_size
         return response.json()
     except requests.exceptions.HTTPError as err:
         if err.response.status_code == 409:
             print(f" [!] Server rejected submission: {err.response.json().get('detail', 'Stale gradients')}")
             return "STALE"
         else:
-            print(f"Failed to submit gradients (HTTP {err.response.status_code}): {e}")
-            return None
-    except Exception as e:
-        print(f"Failed to submit gradients: {e}")
-        return None
+            raise err
+    except requests.exceptions.RequestException as e:
+        raise e
 
-def main(world_size: int, rank: int, batch_size: int, target_versions: int, worker_id: str):
-    print(f"\n Worker {worker_id} (Rank {rank}/{world_size-1}) starting...")
+def main(world_size: int, rank: int, batch_size: int, target_versions: int, worker_id: str, dataset_name: str):
+    global worker_start_time
+    global successful_batches
+    global SERVER_URL
+    
+    worker_start_time = time.time()
+    successful_batches = 0
+    
+    print(f"\n[*] Worker {worker_id} (Rank {rank}/{world_size-1}) starting...")
+    
+    # Initialize Model and Dataset dynamically
+    model = SimpleNet(num_classes=get_num_classes(dataset_name))
+    dataset = get_dataset(dataset_name, train=True)
     
     # ---------------------------------------------------------
     # Universal Dataset Sharding (Data Parallelism)
@@ -140,6 +179,7 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
     
     # Core Distributed Loop over the dataloader bounds
     for batch_idx, (data, target) in enumerate(dataloader):
+        consecutive_failures = 0
         
         while True:
             try:
@@ -196,14 +236,29 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
                 
                 # Record successful train step to prevent double-dipping the same weights
                 last_trained_version = version
+                successful_batches += 1
                 time.sleep(1.0) # Pace for free-tier loc tunnel
                 
                 # Break the polling loop and move to the next batch of images
                 break
 
-            except ConnectionError:
-                print("Could not connect to server, waiting...")
-                time.sleep(2)
+            except requests.exceptions.RequestException as e:
+                # Catch broad network timeouts and Localtunnel 502/503/504s seamlessly
+                consecutive_failures += 1
+                if consecutive_failures <= 3:
+                    print(f"\n[!] Tunnel unstable: {e}")
+                    print(f"    Auto-retrying in 3 seconds... (Attempt {consecutive_failures}/3)")
+                    time.sleep(3.0)
+                    continue
+                else:
+                    print(f"\n[!] Localtunnel decisively crashed: {e}")
+                    # Use a blocking input prompt directly inside the polling loop!
+                    user_input = input("    Enter 'r' to retry, or paste a NEW Server URL (https://...): ").strip()
+                    if user_input.startswith("http"):
+                        SERVER_URL = user_input
+                        print(f"[*] Updated Parameter Server URL successfully: {SERVER_URL}")
+                    consecutive_failures = 0 # Reset failures for the new attempt/tunnel
+                    continue
             except Exception as e:
                 print(f"Error during training loop: {e}")
                 time.sleep(2)
@@ -228,8 +283,11 @@ def main(world_size: int, rank: int, batch_size: int, target_versions: int, work
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parameter Worker")
     parser.add_argument("--pin", type=str, help="4-digit PIN for server authentication")
+    parser.add_argument("--dataset", type=str, default="MNIST", help="Torchvision dataset to use")
     parser.add_argument("--pinSizRanBatEpo", nargs=5, help="Provide PIN, WORLD_SIZE, RANK, BATCH_SIZE, TOTAL_GLOBAL_BATCHES separated by space")
     args = parser.parse_args()
+    
+    worker_dataset = args.dataset
 
     if args.pinSizRanBatEpo:
         WORKER_PIN = args.pinSizRanBatEpo[0]
@@ -271,5 +329,14 @@ if __name__ == "__main__":
     import uuid
     worker_id = str(uuid.uuid4())[:8]
 
-    # Execute universal loop
-    main(world_size=world_size, rank=rank, batch_size=batch_size, target_versions=target_versions, worker_id=worker_id)
+    # Check Dataset Sync
+    check_dataset_sync(worker_dataset)
+
+    # Execute universal loop with Graceful Shutdown Hook
+    try:
+        main(world_size=world_size, rank=rank, batch_size=batch_size, target_versions=target_versions, worker_id=worker_id, dataset_name=worker_dataset)
+        print_worker_metadata(target_versions)
+    except KeyboardInterrupt:
+        print("\n[Worker] Shutting down gracefully...")
+        print_worker_metadata(target_versions)
+        sys.exit(0)
