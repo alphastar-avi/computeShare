@@ -2,6 +2,9 @@
 
 ComputeShare is a lightweight federated machine learning training system built with PyTorch. It enables users to distribute training tasks across multiple machines over the internet, utilizing native hardware acceleration — **CUDA** on NVIDIA GPUs (Windows/Linux), **MPS** (Metal Performance Shaders) on Apple Silicon Macs, or **CPU** as a universal fallback — to split the workload and drastically reduce training time.
 
+# Check out the article on medium:
+[Teaching Computers to Train Together: Building a Distributed Training Platform Across Multiple GPUs](https://medium.com/@avinash592004/teaching-computers-to-train-together-building-a-distributed-training-platform-across-multiple-gpus-f6ee449e3d57)
+
 ## Architecture
 
 The system consists of two primary components operating in a **Bulk Synchronous Parallel** formation:
